@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 import kotlin.time.Duration
 
 /**
@@ -245,7 +245,7 @@ data class StoredEvent(
     val event: GA4Event,
     val clientId: String?,
     val userId: String?,
-    val timestamp: kotlinx.datetime.Instant
+    val timestamp: kotlin.time.Instant
 )
 
 /**

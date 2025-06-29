@@ -36,6 +36,7 @@ kotlin {
         all {
             languageSettings.apply {
                 optIn("kotlinx.coroutines.ExperimentalCoroutinesApi")
+                optIn("kotlin.time.ExperimentalTime")
             }
         }
         val commonMain by getting {
@@ -46,7 +47,6 @@ kotlin {
                 implementation(libs.duks)
                 implementation(libs.duks.routing)
                 implementation(libs.kotlinx.coroutines.core)
-                implementation(libs.kotlinx.datetime)
                 implementation(libs.ktor.client.core)
                 implementation(libs.ktor.client.content.negotiation)
                 implementation(libs.ktor.serialization.kotlinx.json)

@@ -1,7 +1,7 @@
 package duks.ga4.util
 
 import kotlin.random.Random
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 
 /**
  * Utility for generating GA4-compatible client IDs

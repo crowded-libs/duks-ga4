@@ -1,6 +1,6 @@
 package duks.ga4.model
 
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import kotlinx.serialization.Serializable
 
 /**
@@ -48,7 +48,7 @@ data class BatchedEvent(
          * Generates a unique event ID for deduplication
          */
         private fun generateEventId(): String {
-            return "${kotlinx.datetime.Clock.System.now().toEpochMilliseconds()}_${(0..999999).random()}"
+            return "${kotlin.time.Clock.System.now().toEpochMilliseconds()}_${(0..999999).random()}"
         }
     }
 }

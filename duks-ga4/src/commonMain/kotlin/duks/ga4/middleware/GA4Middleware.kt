@@ -1,24 +1,24 @@
 package duks.ga4.middleware
 
 import duks.*
+import duks.ga4.client.EventBatcher
 import duks.ga4.client.GA4Client
 import duks.ga4.client.IGA4Client
-import duks.ga4.client.EventBatcher
 import duks.ga4.config.GA4Config
 import duks.ga4.model.BatchedEvent
 import duks.ga4.model.EventParamValue
 import duks.ga4.model.GA4Event
 import duks.logging.*
 import duks.routing.*
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.datetime.Clock
-import kotlinx.datetime.Instant
-import kotlin.coroutines.cancellation.CancellationException
+import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Instant
 
 /**
  * Middleware that integrates Google Analytics 4 with duks stores.

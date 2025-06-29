@@ -9,6 +9,7 @@ import duks.ga4.privacy.PiiScrubber
 import duks.ga4.privacy.PiiScrubberConfig
 import kotlinx.coroutines.test.runTest
 import kotlin.test.*
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Simple tests for core functionality that should compile
@@ -59,7 +60,7 @@ class SimpleTests {
     }
     
     @Test
-    fun `should scrub PII fields when using default PiiScrubber`() = runTest {
+    fun `should scrub PII fields when using default PiiScrubber`() =  runTest(timeout = 5.seconds) {
         val scrubber = PiiScrubber()
         
         val event = GA4Event(

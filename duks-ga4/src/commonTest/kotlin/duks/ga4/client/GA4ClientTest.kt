@@ -5,17 +5,15 @@ import duks.ga4.config.GA4Config
 import duks.ga4.model.EventParamValue
 import duks.ga4.model.GA4Event
 import duks.ga4.model.GA4Request
-import io.ktor.client.*
 import io.ktor.client.engine.mock.*
-import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.http.*
-import io.ktor.serialization.kotlinx.json.*
-import io.ktor.utils.io.*
-import kotlinx.coroutines.*
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlin.test.*
+import kotlin.time.Duration.Companion.seconds
 
 class GA4ClientTest {
     
@@ -34,14 +32,14 @@ class GA4ClientTest {
     }
     
     @AfterTest
-    fun teardown() = runTest {
+    fun teardown() =  runTest(timeout = 5.seconds) {
         if (::client.isInitialized) {
             client.close()
         }
     }
     
     @Test
-    fun `should send single event immediately to GA4 endpoint`() = runTest {
+    fun `should send single event immediately to GA4 endpoint`() =  runTest(timeout = 5.seconds) {
         val mockEngine = MockEngine { request ->
             assertEquals("https://www.google-analytics.com/mp/collect", request.url.toString().substringBefore("?"))
             assertTrue(request.url.parameters.contains("measurement_id", config.measurementId))
@@ -68,7 +66,7 @@ class GA4ClientTest {
     }
     
     @Test
-    fun `should queue single event for batch processing`() = runTest {
+    fun `should queue single event for batch processing`() =  runTest(timeout = 5.seconds) {
         val mockEngine = MockEngine { request ->
             respond(
                 content = "",
@@ -100,7 +98,7 @@ class GA4ClientTest {
     }
     
     @Test
-    fun `should send multiple events in batches when exceeding batch size`() = runTest {
+    fun `should send multiple events in batches when exceeding batch size`() =  runTest(timeout = 5.seconds) {
         var requestCount = 0
         val mockEngine = MockEngine { request ->
             requestCount++
@@ -127,7 +125,7 @@ class GA4ClientTest {
     }
     
     @Test
-    fun `should auto-generate client ID when not provided and auto-generation enabled`() = runTest {
+    fun `should auto-generate client ID when not provided and auto-generation enabled`() =  runTest(timeout = 5.seconds) {
         val mockEngine = MockEngine { request ->
             // Verify a client ID was generated
             val body = request.body.toByteArray().decodeToString()
@@ -151,7 +149,7 @@ class GA4ClientTest {
     }
     
     @Test
-    fun `should fail when no client ID provided and auto-generation disabled`() = runTest {
+    fun `should fail when no client ID provided and auto-generation disabled`() =  runTest(timeout = 5.seconds) {
         val mockEngine = MockEngine { request ->
             respond(
                 content = "",
@@ -174,7 +172,7 @@ class GA4ClientTest {
     }
     
     @Test
-    fun `should return error when sending empty events list`() = runTest {
+    fun `should return error when sending empty events list`() =  runTest(timeout = 5.seconds) {
         val mockEngine = MockEngine { request ->
             respond(
                 content = "",
@@ -194,7 +192,7 @@ class GA4ClientTest {
     }
     
     @Test
-    fun `should reject events when queue reaches maximum capacity`() = runTest {
+    fun `should reject events when queue reaches maximum capacity`() =  runTest(timeout = 5.seconds) {
         val mockEngine = MockEngine { request ->
             respond(
                 content = "",
@@ -219,7 +217,7 @@ class GA4ClientTest {
     }
     
     @Test
-    fun `should send all queued events when flush is called`() = runTest {
+    fun `should send all queued events when flush is called`() =  runTest(timeout = 5.seconds) {
         val mockEngine = MockEngine { request ->
             respond(
                 content = "",
@@ -249,7 +247,7 @@ class GA4ClientTest {
     }
     
     @Test
-    fun `should use debug endpoint when debug mode is enabled`() = runTest {
+    fun `should use debug endpoint when debug mode is enabled`() =  runTest(timeout = 5.seconds) {
         val mockEngine = MockEngine { request ->
             // Verify debug endpoint is used
             assertEquals("https://www.google-analytics.com/debug/mp/collect", request.url.toString().substringBefore("?"))
@@ -270,7 +268,7 @@ class GA4ClientTest {
     }
     
     @Test
-    fun `should use custom endpoint when configured`() = runTest {
+    fun `should use custom endpoint when configured`() =  runTest(timeout = 5.seconds) {
         val customEndpoint = "https://custom.analytics.example.com/collect"
         val mockEngine = MockEngine { request ->
             // Verify custom endpoint is used
@@ -292,7 +290,7 @@ class GA4ClientTest {
     }
     
     @Test
-    fun `should retry failed requests up to configured retry limit`() = runTest {
+    fun `should retry failed requests up to configured retry limit`() =  runTest(timeout = 5.seconds) {
         var attemptCount = 0
         val mockEngine = MockEngine { request ->
             attemptCount++
@@ -321,7 +319,7 @@ class GA4ClientTest {
     }
     
     @Test
-    fun `should include user ID in request when provided`() = runTest {
+    fun `should include user ID in request when provided`() =  runTest(timeout = 5.seconds) {
         val mockEngine = MockEngine { request ->
             // Verify user ID is included
             val body = request.body.toByteArray().decodeToString()
@@ -348,7 +346,7 @@ class GA4ClientTest {
     }
     
     @Test
-    fun `should group events by client ID when batching`() = runTest {
+    fun `should group events by client ID when batching`() =  runTest(timeout = 5.seconds) {
         val sentRequests = mutableListOf<GA4Request>()
         val mockEngine = MockEngine { request ->
             val body = request.body.toByteArray().decodeToString()
@@ -390,7 +388,7 @@ class GA4ClientTest {
     }
     
     @Test
-    fun `should flush remaining events when client is closed`() = runTest {
+    fun `should flush remaining events when client is closed`() =  runTest(timeout = 5.seconds) {
         var requestMade = false
         val mockEngine = MockEngine { request ->
             requestMade = true
@@ -414,7 +412,7 @@ class GA4ClientTest {
     }
     
     @Test
-    fun `should handle large batch of events correctly`() = runTest {
+    fun `should handle large batch of events correctly`() =  runTest(timeout = 5.seconds) {
         val mockEngine = MockEngine { request ->
             respond(
                 content = "",
@@ -440,7 +438,7 @@ class GA4ClientTest {
     }
     
     @Test
-    fun `should serialize complex event parameters correctly`() = runTest {
+    fun `should serialize complex event parameters correctly`() =  runTest(timeout = 5.seconds) {
         val mockEngine = MockEngine { request ->
             // Verify complex params are serialized correctly
             val body = request.body.toByteArray().decodeToString()
@@ -476,7 +474,7 @@ class GA4ClientTest {
     }
     
     @Test
-    fun `should fail request when timeout is exceeded`() = runTest {
+    fun `should fail request when timeout is exceeded`() =  runTest(timeout = 5.seconds) {
         val mockEngine = MockEngine { request ->
             // Simulate slow response
             delay(200)
@@ -497,7 +495,7 @@ class GA4ClientTest {
     }
     
     @Test
-    fun `should handle concurrent event sending without data loss`() = runTest {
+    fun `should handle concurrent event sending without data loss`() =  runTest(timeout = 5.seconds) {
         val mockEngine = MockEngine { request ->
             respond(
                 content = "",

@@ -29,14 +29,14 @@ class EventBatcherTest {
     }
     
     @AfterTest
-    fun teardown() = runTest {
+    fun teardown() =  runTest(timeout = 5.seconds) {
         if (::batcher.isInitialized) {
             batcher.stop()
         }
     }
     
     @Test
-    fun `should add single event to queue successfully`() = runTest {
+    fun `should add single event to queue successfully`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
             onBatchReady = { batch -> 
@@ -53,7 +53,7 @@ class EventBatcherTest {
     }
     
     @Test
-    fun `should add multiple events to queue and track count`() = runTest {
+    fun `should add multiple events to queue and track count`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
             onBatchReady = { batch -> 
@@ -70,7 +70,7 @@ class EventBatcherTest {
     }
     
     @Test
-    fun `should automatically flush when batch size limit is reached`() = runTest {
+    fun `should automatically flush when batch size limit is reached`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
             onBatchReady = { batch -> 
@@ -98,7 +98,7 @@ class EventBatcherTest {
     }
     
     @Test
-    fun `should flush events manually even when below batch size`() = runTest {
+    fun `should flush events manually even when below batch size`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
             onBatchReady = { batch -> 
@@ -124,7 +124,7 @@ class EventBatcherTest {
     }
     
     @Test
-    fun `should flush all events in multiple batches when exceeding batch size`() = runTest {
+    fun `should flush all events in multiple batches when exceeding batch size`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
             onBatchReady = { batch -> 
@@ -159,7 +159,7 @@ class EventBatcherTest {
     }
     
     @Test
-    fun `should reject new events when queue reaches max capacity`() = runTest {
+    fun `should reject new events when queue reaches max capacity`() =  runTest(timeout = 5.seconds) {
         // Create config with batch size larger than queue size to prevent auto-flush
         val overflowConfig = TestUtils.createTestConfig(batchSizeLimit = 20)
         batcher = EventBatcher(
@@ -186,7 +186,7 @@ class EventBatcherTest {
     }
     
     @Test
-    fun `should allow duplicate events as new batched events have different IDs`() = runTest {
+    fun `should allow duplicate events as new batched events have different IDs`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
             onBatchReady = { batch -> 
@@ -213,7 +213,7 @@ class EventBatcherTest {
     }
     
     @Test
-    fun `should clear all events from queue without sending`() = runTest {
+    fun `should clear all events from queue without sending`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
             onBatchReady = { batch -> 
@@ -237,7 +237,7 @@ class EventBatcherTest {
     }
     
     @Test
-    fun `should requeue failed events with incremented retry count`() = runTest {
+    fun `should requeue failed events with incremented retry count`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
             onBatchReady = { batch -> 
@@ -250,7 +250,7 @@ class EventBatcherTest {
         val failedEvents = TestUtils.createTestEvents(3).map { event ->
             BatchedEvent(
                 event = event,
-                queuedAt = kotlinx.datetime.Clock.System.now(),
+                queuedAt = kotlin.time.Clock.System.now(),
                 clientId = "client-1",
                 retryCount = 1
             )
@@ -272,7 +272,7 @@ class EventBatcherTest {
     }
     
     @Test
-    fun `should not requeue events that exceed max retry limit`() = runTest {
+    fun `should not requeue events that exceed max retry limit`() =  runTest(timeout = 5.seconds) {
         val testConfig = config.copy(maxRetries = 2)
         batcher = EventBatcher(
             config = testConfig,
@@ -286,7 +286,7 @@ class EventBatcherTest {
         val failedEvents = TestUtils.createTestEvents(2).map { event ->
             BatchedEvent(
                 event = event,
-                queuedAt = kotlinx.datetime.Clock.System.now(),
+                queuedAt = kotlin.time.Clock.System.now(),
                 clientId = "client-1",
                 retryCount = 2 // Already at max
             )
@@ -299,7 +299,7 @@ class EventBatcherTest {
     }
     
     @Test
-    fun `should automatically flush events based on time interval`() = runTest {
+    fun `should automatically flush events based on time interval`() =  runTest(timeout = 5.seconds) {
         var batchReceived = false
         batcher = EventBatcher(
             config = config,
@@ -335,7 +335,7 @@ class EventBatcherTest {
     }
     
     @Test
-    fun `should handle concurrent event additions correctly`() = runTest {
+    fun `should handle concurrent event additions correctly`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
             onBatchReady = { batch -> 
@@ -368,7 +368,7 @@ class EventBatcherTest {
     }
     
     @Test
-    fun `should update queue size state flow when events are added or removed`() = runTest {
+    fun `should update queue size state flow when events are added or removed`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
             onBatchReady = { batch -> 
@@ -390,7 +390,7 @@ class EventBatcherTest {
     }
     
     @Test
-    fun `should update processing state flow during batch processing`() = runTest {
+    fun `should update processing state flow during batch processing`() =  runTest(timeout = 5.seconds) {
         var processingStarted = false
 
         batcher = EventBatcher(
@@ -429,7 +429,7 @@ class EventBatcherTest {
     }
     
     @Test
-    fun `should include correct metadata in batched events`() = runTest {
+    fun `should include correct metadata in batched events`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
             onBatchReady = { batch -> 
@@ -456,7 +456,7 @@ class EventBatcherTest {
     }
     
     @Test
-    fun `should stop auto-flush timer when batcher is stopped`() = runTest {
+    fun `should stop auto-flush timer when batcher is stopped`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
             onBatchReady = { batch -> 
@@ -480,7 +480,7 @@ class EventBatcherTest {
     }
     
     @Test
-    fun `should handle flush gracefully when queue is empty`() = runTest {
+    fun `should handle flush gracefully when queue is empty`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
             onBatchReady = { batch -> 

@@ -9,6 +9,7 @@ import duks.ga4.model.EventParamValue
 import duks.ga4.model.GA4Event
 import kotlinx.coroutines.test.runTest
 import kotlin.test.*
+import kotlin.time.Duration.Companion.seconds
 
 class EventMapperTest {
     
@@ -19,7 +20,7 @@ class EventMapperTest {
     )
     
     @Test
-    fun `should map async loading action to loading event with default mapper`() = runTest {
+    fun `should map async loading action to loading event with default mapper`() =  runTest(timeout = 5.seconds) {
         val mapper = DefaultEventMapper<TestState>()
         val state = TestState()
         
@@ -34,7 +35,7 @@ class EventMapperTest {
     }
     
     @Test
-    fun `should map async success action with list data to success event`() = runTest {
+    fun `should map async success action with list data to success event`() =  runTest(timeout = 5.seconds) {
         val mapper = DefaultEventMapper<TestState>()
         val state = TestState()
         
@@ -51,7 +52,7 @@ class EventMapperTest {
     }
     
     @Test
-    fun `should map async failure action to failure event with error message`() = runTest {
+    fun `should map async failure action to failure event with error message`() =  runTest(timeout = 5.seconds) {
         val mapper = DefaultEventMapper<TestState>()
         val state = TestState()
         
@@ -68,7 +69,7 @@ class EventMapperTest {
     }
     
     @Test
-    fun `should map user login action to custom action event`() = runTest {
+    fun `should map user login action to custom action event`() =  runTest(timeout = 5.seconds) {
         val mapper = DefaultEventMapper<TestState>()
         val state = TestState()
         
@@ -82,7 +83,7 @@ class EventMapperTest {
     }
     
     @Test
-    fun `should map user logout action to custom action event`() = runTest {
+    fun `should map user logout action to custom action event`() =  runTest(timeout = 5.seconds) {
         val mapper = DefaultEventMapper<TestState>()
         val state = TestState(isLoggedIn = true)
         
@@ -95,7 +96,7 @@ class EventMapperTest {
     }
     
     @Test
-    fun `should map user sign up action to custom action event`() = runTest {
+    fun `should map user sign up action to custom action event`() =  runTest(timeout = 5.seconds) {
         val mapper = DefaultEventMapper<TestState>()
         val state = TestState()
         
@@ -109,7 +110,7 @@ class EventMapperTest {
     }
     
     @Test
-    fun `should map user profile update action with updated fields to custom action event`() = runTest {
+    fun `should map user profile update action with updated fields to custom action event`() =  runTest(timeout = 5.seconds) {
         val mapper = DefaultEventMapper<TestState>()
         val state = TestState()
         
@@ -125,7 +126,7 @@ class EventMapperTest {
     }
     
     @Test
-    fun `should map commerce view item action to custom action event`() = runTest {
+    fun `should map commerce view item action to custom action event`() =  runTest(timeout = 5.seconds) {
         val mapper = DefaultEventMapper<TestState>()
         val state = TestState()
         
@@ -144,7 +145,7 @@ class EventMapperTest {
     }
     
     @Test
-    fun `should map commerce add to cart action to custom action event`() = runTest {
+    fun `should map commerce add to cart action to custom action event`() =  runTest(timeout = 5.seconds) {
         val mapper = DefaultEventMapper<TestState>()
         val state = TestState()
         
@@ -163,7 +164,7 @@ class EventMapperTest {
     }
     
     @Test
-    fun `should map commerce purchase action to custom action event`() = runTest {
+    fun `should map commerce purchase action to custom action event`() =  runTest(timeout = 5.seconds) {
         val mapper = DefaultEventMapper<TestState>()
         val state = TestState()
         
@@ -182,7 +183,7 @@ class EventMapperTest {
     }
     
     @Test
-    fun `should map unhandled custom action to generic custom action event`() = runTest {
+    fun `should map unhandled custom action to generic custom action event`() =  runTest(timeout = 5.seconds) {
         val mapper = DefaultEventMapper<TestState>()
         val state = TestState()
         
@@ -198,7 +199,7 @@ class EventMapperTest {
     }
     
     @Test
-    fun `should delegate mapping to appropriate mapper when using composite mapper`() = runTest {
+    fun `should delegate mapping to appropriate mapper when using composite mapper`() =  runTest(timeout = 5.seconds) {
         val mapper1 = object : EventMapper<TestState> {
             override suspend fun mapActionAfter(action: Any, state: TestState): List<GA4Event> {
                 return if (action is UserAction) {
@@ -237,7 +238,7 @@ class EventMapperTest {
     }
     
     @Test
-    fun `should only map actions that pass filter predicate when using filtering mapper`() = runTest {
+    fun `should only map actions that pass filter predicate when using filtering mapper`() =  runTest(timeout = 5.seconds) {
         val baseMapper = DefaultEventMapper<TestState>()
         
         // Only map user actions
@@ -266,7 +267,7 @@ class EventMapperTest {
     }
     
     @Test
-    fun `should map actions to events based on registered patterns`() = runTest {
+    fun `should map actions to events based on registered patterns`() =  runTest(timeout = 5.seconds) {
         val patternMapper = PatternEventMapper<TestState>()
         
         // Register patterns
@@ -321,7 +322,7 @@ class EventMapperTest {
     }
     
     @Test
-    fun `should map action before state change when implementing mapActionBefore`() = runTest {
+    fun `should map action before state change when implementing mapActionBefore`() =  runTest(timeout = 5.seconds) {
         val mapper = object : EventMapper<TestState> {
             override suspend fun mapActionBefore(action: Any, state: TestState): List<GA4Event> {
                 return if (action is CommerceAction.BeginCheckout) {
@@ -357,7 +358,7 @@ class EventMapperTest {
     }
     
     @Test
-    fun `should generate multiple events based on state when mapping complex scenarios`() = runTest {
+    fun `should generate multiple events based on state when mapping complex scenarios`() =  runTest(timeout = 5.seconds) {
         val mapper = object : EventMapper<TestState> {
             override suspend fun mapActionAfter(action: Any, state: TestState): List<GA4Event> {
                 return when (action) {

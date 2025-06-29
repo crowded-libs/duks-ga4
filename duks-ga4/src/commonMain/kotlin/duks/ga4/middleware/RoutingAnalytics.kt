@@ -3,7 +3,7 @@ package duks.ga4.middleware
 import duks.ga4.model.EventParamValue
 import duks.ga4.model.GA4Event
 // import duks.routing.RouterState
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 import kotlin.time.Duration
 
 /**

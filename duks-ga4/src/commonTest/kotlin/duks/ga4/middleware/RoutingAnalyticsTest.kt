@@ -45,6 +45,7 @@ class RoutingAnalyticsTest {
         )
         
         val store = createStore(TestAppState()) {
+            scope(backgroundScope)
             middleware {
                 middleware(ga4Middleware)
                 scope(this@runTest)
@@ -78,6 +79,7 @@ class RoutingAnalyticsTest {
         )
         
         val store = createStore(TestAppState()) {
+            scope(backgroundScope)
             routing {
                 content("/home") { TestHomeScreen() }
             }
@@ -161,13 +163,13 @@ class RoutingAnalyticsTest {
         lateinit var ga4Middleware: GA4Middleware<TestAppState>
         
         val store = createStore(TestAppState()) {
+            scope(backgroundScope)
             // Set up routing
             routerMiddleware = routing {
                 content("/home") { TestHomeScreen() }
                 content("/profile") { TestProfileScreen() }
                 modal("/settings") { TestSettingsModal() }
             }
-            scope(this@runTest)
             // Set up GA4 with direct router integration
             ga4Middleware = GA4Middleware(
                 config = config,
@@ -315,13 +317,13 @@ class RoutingAnalyticsTest {
         lateinit var ga4Middleware: GA4Middleware<TestAppState>
         
         val store = createStore(TestAppState()) {
+            scope(backgroundScope)
             // Set up routing
             routing {
                 content("/home") { TestHomeScreen() }
                 content("/profile") { TestProfileScreen() }
             }
-            scope(this@runTest)
-            
+
             // Set up GA4 without direct router integration
             // It will listen for Routing.StateChanged actions
             ga4Middleware = GA4Middleware(
@@ -381,12 +383,12 @@ class RoutingAnalyticsTest {
         lateinit var ga4Middleware: GA4Middleware<TestAppState>
         
         val store = createStore(TestAppState()) {
+            scope(backgroundScope)
             routerMiddleware = routing {
                 content("/videos", config = mapOf("selectedTab" to "videos")) { TestVideosScreen() }
                 content("/music", config = mapOf("selectedTab" to "music")) { TestMusicScreen() }
             }
-            scope(this@runTest)
-            
+
             ga4Middleware = GA4Middleware(
                 config = config,
                 enableRoutingAnalytics = true,
@@ -443,13 +445,13 @@ class RoutingAnalyticsTest {
         lateinit var ga4Middleware: GA4Middleware<TestAppState>
         
         val store = createStore(TestAppState()) {
+            scope(backgroundScope)
             routerMiddleware = routing {
                 scene("/splash") { TestSplashScreen() }
                 scene("/login") { TestLoginScreen() }
                 content("/home") { TestHomeScreen() }
             }
-            scope(this@runTest)
-            
+
             ga4Middleware = GA4Middleware(
                 config = config,
                 enableRoutingAnalytics = true,
@@ -514,95 +516,6 @@ class RoutingAnalyticsTest {
         // Clean up
         ga4Middleware.onDetach()
     }
-    
-    // Screen time tracking is already tested in other tests, particularly in
-    // "test routing analytics with direct RouterMiddleware integration"
-    // where we can see screen_time events being generated
-    /*
-    @Test
-    fun `test screen time tracking`() = runTest(timeout = 5.seconds) {
-        val mockClient = MockGA4Client()
-        val config = GA4Config(
-            measurementId = "G-TEST",
-            apiSecret = "test-secret",
-            debugMode = true
-        )
-        
-        lateinit var routerMiddleware: RouterMiddleware<TestAppState>
-        lateinit var ga4Middleware: GA4Middleware<TestAppState>
-        
-        val store = createStore(TestAppState()) {
-            routerMiddleware = routing {
-                content("/home") { TestHomeScreen() }
-                content("/profile") { TestProfileScreen() }
-            }
-            scope(this@runTest)
-            
-            ga4Middleware = GA4Middleware(
-                config = config,
-                enableRoutingAnalytics = true,
-                routerMiddleware = routerMiddleware,
-                flushInterval = 1.hours,  // Disable auto-flush to avoid timing issues
-                clientFactory = { mockClient },
-                scope = backgroundScope  // Use backgroundScope for background tasks
-            )
-            
-            middleware {
-                middleware(ga4Middleware)
-                lifecycleAware(ga4Middleware)
-            }
-        }
-        
-        // Navigate to home
-        store.routeTo("/home")
-        routerMiddleware.state.first { it.getCurrentContentRoute()?.route?.path == "/home" }
-        
-        // Wait a bit to accumulate screen time
-        delay(100)  // Wait 100ms
-        runCurrent()
-        advanceUntilIdle()
-
-        // Navigate to profile (should trigger screen time for home)
-        logger.info { "Navigating to /profile" }
-        store.routeTo("/profile")
-        routerMiddleware.state.first { it.getCurrentContentRoute()?.route?.path == "/profile" }
-        logger.info { "Navigation to /profile completed" }
-        
-        // Wait for router state change to be processed
-        delay(50)
-        runCurrent()
-        advanceUntilIdle()
-        
-        // Manually flush to ensure screen time is recorded
-        ga4Middleware.flushEvents()
-        runCurrent()
-        advanceUntilIdle()
-
-        // Detach middleware (should trigger final screen time)
-        ga4Middleware.onDetach()
-
-        runCurrent()
-        advanceUntilIdle()
-
-        // Log all events
-        logger.info { "All events in screen time test: ${mockClient.sentEvents.map { "${it.name}: ${it.params}" }}" }
-        
-        // Verify screen time event was sent
-        val screenTimeEvents = mockClient.sentEvents.filter { it.name == "screen_time" }
-        logger.info { "Screen time events: ${screenTimeEvents.map { it.params }}" }
-        
-        // Screen time should be tracked for at least one of the screens
-        assertTrue(screenTimeEvents.isNotEmpty(), "Expected at least one screen_time event")
-        
-        // Check if we have screen time for home or profile
-        val hasValidScreenTime = screenTimeEvents.any { event ->
-            val screenName = (event.params["screen_name"] as? duks.ga4.model.EventParamValue.StringValue)?.value
-            val duration = (event.params["duration_seconds"] as? duks.ga4.model.EventParamValue.NumberValue)?.value ?: 0.0
-            (screenName == "home" || screenName == "profile") && duration >= 0.0
-        }
-        assertTrue(hasValidScreenTime, "Expected valid screen_time event for home or profile screen")
-    }
-    */
 }
 
 // Test composables

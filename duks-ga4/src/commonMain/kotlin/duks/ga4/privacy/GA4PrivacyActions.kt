@@ -1,13 +1,10 @@
 package duks.ga4.privacy
 
-import duks.ga4.model.GA4Event
 import duks.ga4.model.EventParamValue
-import duks.ga4.model.Item
-import kotlinx.datetime.Instant
-import kotlinx.datetime.Clock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.encodeToString
+import kotlin.time.Clock
+import kotlin.time.Instant
 
 /**
  * Privacy-related actions for GA4 SDK

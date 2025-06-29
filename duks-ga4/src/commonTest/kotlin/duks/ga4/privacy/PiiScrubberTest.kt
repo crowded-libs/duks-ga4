@@ -6,6 +6,7 @@ import duks.ga4.model.GA4Event
 import duks.ga4.model.Item
 import kotlinx.coroutines.test.runTest
 import kotlin.test.*
+import kotlin.time.Duration.Companion.seconds
 
 class PiiScrubberTest {
     
@@ -17,7 +18,7 @@ class PiiScrubberTest {
     }
     
     @Test
-    fun `should scrub email addresses in message content and email fields`() = runTest {
+    fun `should scrub email addresses in message content and email fields`() =  runTest(timeout = 5.seconds) {
         val event = GA4Event(
             name = "test_event",
             params = mapOf(
@@ -38,7 +39,7 @@ class PiiScrubberTest {
     }
     
     @Test
-    fun `should scrub phone numbers in various formats and field names`() = runTest {
+    fun `should scrub phone numbers in various formats and field names`() =  runTest(timeout = 5.seconds) {
         val event = GA4Event(
             name = "contact_form",
             params = mapOf(
@@ -61,7 +62,7 @@ class PiiScrubberTest {
     }
     
     @Test
-    fun `should scrub credit card numbers in fields and content`() = runTest {
+    fun `should scrub credit card numbers in fields and content`() =  runTest(timeout = 5.seconds) {
         val event = GA4Event(
             name = "payment_info",
             params = mapOf(
@@ -81,7 +82,7 @@ class PiiScrubberTest {
     }
     
     @Test
-    fun `should scrub SSN patterns in different formats`() = runTest {
+    fun `should scrub SSN patterns in different formats`() =  runTest(timeout = 5.seconds) {
         val event = GA4Event(
             name = "user_data",
             params = mapOf(
@@ -103,7 +104,7 @@ class PiiScrubberTest {
     }
     
     @Test
-    fun `should scrub IP addresses in fields and log content`() = runTest {
+    fun `should scrub IP addresses in fields and log content`() =  runTest(timeout = 5.seconds) {
         val event = GA4Event(
             name = "network_info",
             params = mapOf(
@@ -125,7 +126,7 @@ class PiiScrubberTest {
     }
     
     @Test
-    fun `should scrub all personal information fields by field name`() = runTest {
+    fun `should scrub all personal information fields by field name`() =  runTest(timeout = 5.seconds) {
         val event = GA4Event(
             name = "user_profile",
             params = mapOf(
@@ -153,7 +154,7 @@ class PiiScrubberTest {
     }
     
     @Test
-    fun `should not modify numeric parameter values`() = runTest {
+    fun `should not modify numeric parameter values`() =  runTest(timeout = 5.seconds) {
         val event = GA4Event(
             name = "metrics",
             params = mapOf(
@@ -172,7 +173,7 @@ class PiiScrubberTest {
     }
     
     @Test
-    fun `should not modify boolean parameter values`() = runTest {
+    fun `should not modify boolean parameter values`() =  runTest(timeout = 5.seconds) {
         val event = GA4Event(
             name = "flags",
             params = mapOf(
@@ -189,7 +190,7 @@ class PiiScrubberTest {
     }
     
     @Test
-    fun `should scrub PII content within item properties`() = runTest {
+    fun `should scrub PII content within item properties`() =  runTest(timeout = 5.seconds) {
         val items = listOf(
             Item(
                 itemId = "123",
@@ -221,7 +222,7 @@ class PiiScrubberTest {
     }
     
     @Test
-    fun `should not scrub any content when scrubber is disabled`() = runTest {
+    fun `should not scrub any content when scrubber is disabled`() =  runTest(timeout = 5.seconds) {
         val config = PiiScrubberConfig(enabled = false)
         scrubber = PiiScrubber(config)
         
@@ -241,7 +242,7 @@ class PiiScrubberTest {
     }
     
     @Test
-    fun `should use custom redacted value when configured`() = runTest {
+    fun `should use custom redacted value when configured`() =  runTest(timeout = 5.seconds) {
         val config = PiiScrubberConfig(redactedValue = "[REMOVED]")
         scrubber = PiiScrubber(config)
         
@@ -258,7 +259,7 @@ class PiiScrubberTest {
     }
     
     @Test
-    fun `should remove PII fields entirely when removeFields is enabled`() = runTest {
+    fun `should remove PII fields entirely when removeFields is enabled`() =  runTest(timeout = 5.seconds) {
         val config = PiiScrubberConfig(removeFields = true)
         scrubber = PiiScrubber(config)
         
@@ -279,7 +280,7 @@ class PiiScrubberTest {
     }
     
     @Test
-    fun `should scrub custom PII fields when configured`() = runTest {
+    fun `should scrub custom PII fields when configured`() =  runTest(timeout = 5.seconds) {
         val config = PiiScrubberConfig(
             customPiiFields = setOf("employee_id", "badge_number")
         )
@@ -302,7 +303,7 @@ class PiiScrubberTest {
     }
     
     @Test
-    fun `should scrub content matching custom regex patterns`() = runTest {
+    fun `should scrub content matching custom regex patterns`() =  runTest(timeout = 5.seconds) {
         val config = PiiScrubberConfig(
             customPatterns = listOf(
                 Regex("EMP\\d+"),  // Employee ID pattern
@@ -325,7 +326,7 @@ class PiiScrubberTest {
     }
     
     @Test
-    fun `should correctly identify text containing PII patterns`() = runTest {
+    fun `should correctly identify text containing PII patterns`() =  runTest(timeout = 5.seconds) {
         // Test email detection
         assertTrue(scrubber.containsPii("Contact us at support@example.com"))
         assertFalse(scrubber.containsPii("Contact us at support"))
@@ -348,7 +349,7 @@ class PiiScrubberTest {
     }
     
     @Test
-    fun `should only scrub enabled PII types when selectively configured`() = runTest {
+    fun `should only scrub enabled PII types when selectively configured`() =  runTest(timeout = 5.seconds) {
         val config = PiiScrubberConfig(
             scrubEmails = true,
             scrubPhoneNumbers = false,
@@ -380,7 +381,7 @@ class PiiScrubberTest {
     }
     
     @Test
-    fun `should scrub multiple PII patterns in complex nested data`() = runTest {
+    fun `should scrub multiple PII patterns in complex nested data`() =  runTest(timeout = 5.seconds) {
         val event = GA4Event(
             name = "complex_event",
             params = mapOf(

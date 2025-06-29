@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlin.test.*
+import kotlin.time.Duration.Companion.seconds
 
 class ConsentManagerTest {
     
@@ -20,7 +21,7 @@ class ConsentManagerTest {
     }
     
     @Test
-    fun `should have null consent values by default when no explicit consent given`() = runTest {
+    fun `should have null consent values by default when no explicit consent given`() =  runTest(timeout = 5.seconds) {
         val testDispatcher = UnconfinedTestDispatcher()
         consentManager = DefaultConsentManager(storage, dispatcher = testDispatcher)
         
@@ -34,7 +35,7 @@ class ConsentManagerTest {
     }
     
     @Test
-    fun `should use custom default consent values when provided`() = runTest {
+    fun `should use custom default consent values when provided`() =  runTest(timeout = 5.seconds) {
         val customDefault = ConsentState(
             analyticsStorage = ConsentValue.GRANTED,
             functionalityStorage = ConsentValue.GRANTED
@@ -50,7 +51,7 @@ class ConsentManagerTest {
     }
     
     @Test
-    fun `should update consent state and persist to storage`() = runTest {
+    fun `should update consent state and persist to storage`() =  runTest(timeout = 5.seconds) {
         val testDispatcher = UnconfinedTestDispatcher()
         consentManager = DefaultConsentManager(storage, dispatcher = testDispatcher)
         
@@ -70,7 +71,7 @@ class ConsentManagerTest {
     }
     
     @Test
-    fun `should update individual consent types and save to storage`() = runTest {
+    fun `should update individual consent types and save to storage`() =  runTest(timeout = 5.seconds) {
         val testDispatcher = UnconfinedTestDispatcher()
         consentManager = DefaultConsentManager(storage, dispatcher = testDispatcher)
         
@@ -91,7 +92,7 @@ class ConsentManagerTest {
     }
     
     @Test
-    fun `should grant all consent types when grantAll is called`() = runTest {
+    fun `should grant all consent types when grantAll is called`() =  runTest(timeout = 5.seconds) {
         val testDispatcher = UnconfinedTestDispatcher()
         consentManager = DefaultConsentManager(storage, dispatcher = testDispatcher)
         
@@ -108,7 +109,7 @@ class ConsentManagerTest {
     }
     
     @Test
-    fun `should deny all consent types when denyAll is called`() = runTest {
+    fun `should deny all consent types when denyAll is called`() =  runTest(timeout = 5.seconds) {
         val testDispatcher = UnconfinedTestDispatcher()
         consentManager = DefaultConsentManager(storage, dispatcher = testDispatcher)
         
@@ -138,7 +139,7 @@ class ConsentManagerTest {
     }
     
     @Test
-    fun `should reset consent to default values and clear storage`() = runTest {
+    fun `should reset consent to default values and clear storage`() =  runTest(timeout = 5.seconds) {
         val defaultConsent = ConsentState(
             analyticsStorage = ConsentValue.GRANTED
         )
@@ -170,7 +171,7 @@ class ConsentManagerTest {
     }
     
     @Test
-    fun `should update analytics enabled flow based on analytics consent`() = runTest {
+    fun `should update analytics enabled flow based on analytics consent`() =  runTest(timeout = 5.seconds) {
         val testDispatcher = UnconfinedTestDispatcher()
         consentManager = DefaultConsentManager(storage, dispatcher = testDispatcher)
         
@@ -193,7 +194,7 @@ class ConsentManagerTest {
     }
     
     @Test
-    fun `should update advertising enabled flow based on ad storage consent`() = runTest {
+    fun `should update advertising enabled flow based on ad storage consent`() =  runTest(timeout = 5.seconds) {
         val testDispatcher = UnconfinedTestDispatcher()
         consentManager = DefaultConsentManager(storage, dispatcher = testDispatcher)
         
@@ -216,7 +217,7 @@ class ConsentManagerTest {
     }
     
     @Test
-    fun `should determine event processing based on consent and event type`() = runTest {
+    fun `should determine event processing based on consent and event type`() =  runTest(timeout = 5.seconds) {
         val testDispatcher = UnconfinedTestDispatcher()
         consentManager = DefaultConsentManager(storage, dispatcher = testDispatcher)
         
@@ -256,7 +257,7 @@ class ConsentManagerTest {
     }
     
     @Test
-    fun `should process purchase events with only analytics consent`() = runTest {
+    fun `should process purchase events with only analytics consent`() =  runTest(timeout = 5.seconds) {
         val testDispatcher = UnconfinedTestDispatcher()
         consentManager = DefaultConsentManager(storage, dispatcher = testDispatcher)
         
@@ -275,7 +276,7 @@ class ConsentManagerTest {
     }
     
     @Test
-    fun `should load saved consent from storage on initialization`() = runTest {
+    fun `should load saved consent from storage on initialization`() =  runTest(timeout = 5.seconds) {
         // Pre-save consent in storage
         val savedConsent = ConsentState(
             adStorage = ConsentValue.GRANTED,
@@ -301,7 +302,7 @@ class ConsentManagerTest {
     }
     
     @Test
-    fun `should emit consent state changes to flow subscribers`() = runTest {
+    fun `should emit consent state changes to flow subscribers`() =  runTest(timeout = 5.seconds) {
         val testDispatcher = UnconfinedTestDispatcher()
         consentManager = DefaultConsentManager(storage, dispatcher = testDispatcher)
         
@@ -330,7 +331,7 @@ class ConsentManagerTest {
     }
     
     @Test
-    fun `should correctly update all individual consent types`() = runTest {
+    fun `should correctly update all individual consent types`() =  runTest(timeout = 5.seconds) {
         val testDispatcher = UnconfinedTestDispatcher()
         consentManager = DefaultConsentManager(storage, dispatcher = testDispatcher)
         

@@ -1,25 +1,15 @@
 package duks.ga4.middleware
 
-import duks.ga4.MockGA4Client
-import duks.ga4.TestAction
-import duks.ga4.TestEventMapper
-import duks.ga4.TestUtils
+import duks.ga4.*
 import duks.ga4.config.GA4Config
 import duks.ga4.model.EventParamValue
 import duks.ga4.model.GA4Event
-import duks.ga4.RouterState
-import duks.ga4.middleware.GA4MiddlewareError
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.take
-import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import kotlin.test.*
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
@@ -47,12 +37,7 @@ class GA4MiddlewareTest {
     }
     
     @AfterTest
-    fun teardown() = runTest {
-        // Clean up middleware if it exists
-        if (::middleware.isInitialized) {
-            middleware.onDetach()
-        }
-        
+    fun teardown() {
         // Reset event mapper counts between tests
         eventMapper.mapBeforeCallCount = 0
         eventMapper.mapAfterCallCount = 0
@@ -62,7 +47,7 @@ class GA4MiddlewareTest {
     }
     
     @Test
-    fun `should initialize middleware when attached to store`() = runTest {
+    fun `should initialize middleware when attached to store`() =  runTest(timeout = 5.seconds) {
         middleware = GA4Middleware(
             config = config,
             eventMapper = eventMapper,
@@ -72,6 +57,7 @@ class GA4MiddlewareTest {
         
         // Create a test store
         val store = duks.createStore(TestState()) {
+            scope(backgroundScope)
             reduceWith { state, action -> state }
             middleware {
                 lifecycleAware(middleware)
@@ -88,7 +74,7 @@ class GA4MiddlewareTest {
     }
     
     @Test
-    fun `should map tracked actions to events using event mapper`() = runTest {
+    fun `should map tracked actions to events using event mapper`() =  runTest(timeout = 5.seconds) {
         middleware = GA4Middleware(
             config = config,
             eventMapper = eventMapper,
@@ -110,6 +96,7 @@ class GA4MiddlewareTest {
         }
         
         val store = duks.createStore(TestState()) {
+            scope(backgroundScope)
             reduceWith { state, action -> 
                 val newState = when (action) {
                     is TestAction.Tracked -> state.copy(counter = state.counter + 1)
@@ -153,7 +140,7 @@ class GA4MiddlewareTest {
     }
     
     @Test
-    fun `should call mapActionBefore and mapActionAfter for tracked actions`() = runTest {
+    fun `should call mapActionBefore and mapActionAfter for tracked actions`() =  runTest(timeout = 5.seconds) {
         middleware = GA4Middleware(
             config = config,
             eventMapper = eventMapper,
@@ -174,7 +161,8 @@ class GA4MiddlewareTest {
         }
         
         val store = duks.createStore(TestState()) {
-            reduceWith { state, action -> 
+            scope(backgroundScope)
+            reduceWith { state, action ->
                 when (action) {
                     is TestAction.TrackedBefore -> state.copy(counter = state.counter + 1)
                     else -> state
@@ -211,7 +199,7 @@ class GA4MiddlewareTest {
     }
     
     @Test
-    fun `should handle actions that generate multiple events`() = runTest {
+    fun `should handle actions that generate multiple events`() =  runTest(timeout = 5.seconds) {
         middleware = GA4Middleware(
             config = config,
             eventMapper = eventMapper,
@@ -232,7 +220,8 @@ class GA4MiddlewareTest {
         }
         
         val store = duks.createStore(TestState()) {
-            reduceWith { state, action -> 
+            scope(backgroundScope)
+            reduceWith { state, action ->
                 when (action) {
                     is TestAction.MultiTracked -> state.copy(counter = state.counter + 1)
                     else -> state
@@ -268,7 +257,7 @@ class GA4MiddlewareTest {
     }
     
     @Test
-    fun `should call mapper but generate no events for untracked actions`() = runTest {
+    fun `should call mapper but generate no events for untracked actions`() =  runTest(timeout = 5.seconds) {
         middleware = GA4Middleware(
             config = config,
             eventMapper = eventMapper,
@@ -289,7 +278,8 @@ class GA4MiddlewareTest {
         }
         
         val store = duks.createStore(TestState()) {
-            reduceWith { state, action -> 
+            scope(backgroundScope)
+            reduceWith { state, action ->
                 when (action) {
                     is TestAction.NotTracked -> state.copy(counter = state.counter + 1)
                     else -> state
@@ -324,7 +314,7 @@ class GA4MiddlewareTest {
     }
     
     @Test
-    fun `should use custom client ID provider when configured`() = runTest {
+    fun `should use custom client ID provider when configured`() =  runTest(timeout = 5.seconds) {
         var clientIdCalled = false
         
         middleware = GA4Middleware(
@@ -351,7 +341,8 @@ class GA4MiddlewareTest {
         }
         
         val store = duks.createStore(TestState(sessionId = "session-123")) {
-            reduceWith { state, action -> 
+            scope(backgroundScope)
+            reduceWith { state, action ->
                 when (action) {
                     is TestAction.Tracked -> state.copy(counter = state.counter + 1)
                     else -> state
@@ -382,7 +373,7 @@ class GA4MiddlewareTest {
     }
     
     @Test
-    fun `should use custom user ID provider when configured`() = runTest {
+    fun `should use custom user ID provider when configured`() =  runTest(timeout = 5.seconds) {
         var userIdCalled = false
         
         middleware = GA4Middleware(
@@ -409,7 +400,8 @@ class GA4MiddlewareTest {
         }
         
         val store = duks.createStore(TestState(userId = "user-456")) {
-            reduceWith { state, action -> 
+            scope(backgroundScope)
+            reduceWith { state, action ->
                 when (action) {
                     is TestAction.Tracked -> state.copy(counter = state.counter + 1)
                     else -> state
@@ -440,7 +432,7 @@ class GA4MiddlewareTest {
     }
     
     @Test
-    fun `should use default event mapper when none provided`() = runTest {
+    fun `should use default event mapper when none provided`() =  runTest(timeout = 5.seconds) {
         // Test without custom event mapper
         middleware = GA4Middleware(
             config = config,
@@ -461,6 +453,7 @@ class GA4MiddlewareTest {
         }
         
         val store = duks.createStore(TestState()) {
+            scope(backgroundScope)
             reduceWith { state, action -> state }
             middleware {
                 middleware(testMiddleware)
@@ -481,10 +474,22 @@ class GA4MiddlewareTest {
     }
     
     @Test
-    fun `should emit mapping errors to error flow when mapper throws`() = runTest {
-        // Create mapper that throws error
+    fun `should handle mapper errors gracefully and continue processing`() = runTest {
+        var mapperBeforeCalled = false
+        var mapperAfterCalled = false
+        var mapperThrew = false
+        var errorEmitted = false
+        
+        // Create mapper that throws error only on mapActionAfter
         val errorMapper = object : EventMapper<TestState> {
+            override suspend fun mapActionBefore(action: Any, state: TestState): List<GA4Event> {
+                mapperBeforeCalled = true
+                return emptyList()
+            }
+            
             override suspend fun mapActionAfter(action: Any, state: TestState): List<GA4Event> {
+                mapperAfterCalled = true
+                mapperThrew = true
                 throw RuntimeException("Mapping error")
             }
         }
@@ -492,10 +497,19 @@ class GA4MiddlewareTest {
         middleware = GA4Middleware(
             config = config,
             eventMapper = errorMapper,
-            flushInterval = 100.milliseconds,
+            flushInterval = 10.seconds,
             clientFactory = { mockClient },
             scope = backgroundScope
         )
+        
+        // Subscribe to error flow
+        val errorJob = launch {
+            middleware.errors.collect { error ->
+                if (error is GA4MiddlewareError.MappingError) {
+                    errorEmitted = true
+                }
+            }
+        }
         
         // Create a test store with proper middleware builder
         val testMiddleware = object : duks.Middleware<TestState> {
@@ -508,20 +522,24 @@ class GA4MiddlewareTest {
             }
         }
         
+        var reducerCalled = false
         val store = duks.createStore(TestState()) {
+            scope(backgroundScope)
             reduceWith { state, action ->
                 when (action) {
-                    is TestAction.Tracked -> state.copy(counter = state.counter + 1)
+                    is TestAction.Tracked -> {
+                        reducerCalled = true
+                        state.copy(counter = state.counter + 1)
+                    }
                     else -> state
                 }
             }
             middleware {
                 middleware(testMiddleware)
             }
-            scope(backgroundScope)
         }
         
-        // Manually initialize middleware since we're not using lifecycleAware
+        // Manually initialize middleware
         middleware.onStoreCreated(store)
         
         // Wait for initialization
@@ -529,21 +547,31 @@ class GA4MiddlewareTest {
         
         // Trigger action that will cause error
         store.dispatch(TestAction.Tracked("test"))
-        // Wait for the action to be processed
-        store.state.first { it.counter == 1 }
         
-        // Wait for error to be emitted
-        val error = withTimeout(2.seconds) {
-            middleware.errors.first()
-        }
+        // Wait for state to update
+        val updatedState = store.state.first { it.counter == 1 }
         
-        // Verify error is correct type
-        assertTrue(error is GA4MiddlewareError.MappingError)
-        assertEquals("Mapping error", (error as GA4MiddlewareError.MappingError).cause.message)
+        // Give time for error to be emitted
+        delay(100)
+        
+        // Verify the action completed despite the mapper error
+        assertTrue(reducerCalled, "Reducer should have been called despite mapper error")
+        assertTrue(mapperBeforeCalled, "Mapper before should have been called")
+        assertTrue(mapperAfterCalled, "Mapper after should have been called")
+        assertTrue(mapperThrew, "Mapper should have thrown an exception")
+        assertTrue(errorEmitted, "Error should have been emitted to error flow")
+        assertEquals(1, updatedState.counter, "Action should complete despite mapper error")
+        
+        // Clean up
+        errorJob.cancel()
+        middleware.onDetach()
+        
+        // Give time for cleanup
+        delay(100)
     }
     
     @Test
-    fun `should not set up routing analytics when disabled`() = runTest {
+    fun `should not set up routing analytics when disabled`() =  runTest(timeout = 5.seconds) {
         middleware = GA4Middleware(
             config = config,
             eventMapper = eventMapper,
@@ -554,6 +582,7 @@ class GA4MiddlewareTest {
         
         // Create a test store
         val store = duks.createStore(TestState()) {
+            scope(backgroundScope)
             reduceWith { state, action -> state }
             middleware {
                 lifecycleAware(middleware)
@@ -571,7 +600,7 @@ class GA4MiddlewareTest {
     }
     
     @Test
-    fun `should track screen time between route changes`() = runTest {
+    fun `should track screen time between route changes`() =  runTest(timeout = 5.seconds) {
         // This would require actual router integration
         // For now, test the screen time calculation logic
         
@@ -584,6 +613,7 @@ class GA4MiddlewareTest {
         
         // Create a test store
         val store = duks.createStore(TestState()) {
+            scope(backgroundScope)
             reduceWith { state, action -> state }
             middleware {
                 lifecycleAware(middleware)
@@ -620,7 +650,7 @@ class GA4MiddlewareTest {
     }
     
     @Test
-    fun `should handle concurrent action processing correctly`() = runTest {
+    fun `should handle concurrent action processing correctly`() = runTest(timeout = 5.seconds) {
         middleware = GA4Middleware(
             config = config,
             eventMapper = eventMapper,
@@ -641,6 +671,8 @@ class GA4MiddlewareTest {
         }
         
         val store = duks.createStore(TestState()) {
+            scope(backgroundScope)
+            scope(backgroundScope)
             reduceWith { state, action -> 
                 when (action) {
                     is TestAction.Tracked -> state.copy(counter = state.counter + 1)
@@ -667,6 +699,8 @@ class GA4MiddlewareTest {
         }
         
         jobs.forEach { it.join() }
+        runCurrent()
+        advanceUntilIdle()
         
         // Wait for state to update
         store.state.first { it.counter == 10 }
@@ -688,7 +722,7 @@ class GA4MiddlewareTest {
     }
     
     @Test
-    fun `should flush pending events when middleware is detached`() = runTest {
+    fun `should flush pending events when middleware is detached`() =  runTest(timeout = 5.seconds) {
         // Would need to mock or spy on the batcher to verify flush
         middleware = GA4Middleware(
             config = config,
@@ -709,6 +743,7 @@ class GA4MiddlewareTest {
         }
         
         val store = duks.createStore(TestState()) {
+            scope(backgroundScope)
             reduceWith { state, action -> state }
             middleware {
                 middleware(testMiddleware)
@@ -734,7 +769,7 @@ class GA4MiddlewareTest {
     }
     
     @Test
-    fun `should map different async action states with default mapper`() = runTest {
+    fun `should map different async action states with default mapper`() =  runTest(timeout = 5.seconds) {
         middleware = GA4Middleware(
             config = config,
             eventMapper = null, // Use default mapper
@@ -754,6 +789,7 @@ class GA4MiddlewareTest {
         }
         
         val store = duks.createStore(TestState()) {
+            scope(backgroundScope)
             reduceWith { state, action -> state }
             middleware {
                 middleware(testMiddleware)
@@ -782,7 +818,7 @@ class GA4MiddlewareTest {
     }
     
     @Test
-    fun `should respect custom flush interval configuration`() = runTest {
+    fun `should respect custom flush interval configuration`() =  runTest(timeout = 5.seconds) {
         middleware = GA4Middleware(
             config = config,
             eventMapper = eventMapper,
@@ -803,6 +839,7 @@ class GA4MiddlewareTest {
         }
         
         val store = duks.createStore(TestState()) {
+            scope(backgroundScope)
             reduceWith { state, action -> state }
             middleware {
                 middleware(testMiddleware)
@@ -817,7 +854,7 @@ class GA4MiddlewareTest {
     }
     
     @Test
-    fun `should track state changes through custom event mapper`() = runTest {
+    fun `should track state changes through custom event mapper`() =  runTest(timeout = 5.seconds) {
         middleware = GA4Middleware(
             config = config,
             eventMapper = object : EventMapper<TestState> {
@@ -850,6 +887,7 @@ class GA4MiddlewareTest {
         }
         
         val store = duks.createStore(TestState(counter = 0)) {
+            scope(backgroundScope)
             reduceWith { state, action ->
                 when (action) {
                     is TestAction.Tracked -> state.copy(counter = state.counter + 1)

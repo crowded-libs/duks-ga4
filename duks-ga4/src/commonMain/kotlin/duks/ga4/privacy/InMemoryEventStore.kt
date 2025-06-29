@@ -3,7 +3,7 @@ package duks.ga4.privacy
 import duks.logging.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 
 /**
  * In-memory implementation of event storage for testing and simple use cases
