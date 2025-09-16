@@ -100,7 +100,6 @@ open class DefaultEventMapper<TState> : EventMapper<TState> {
             name = "custom_action",
             params = mapOf(
                 "action_type" to EventParamValue.StringValue(action::class.simpleName ?: "unknown"),
-                "action_class" to EventParamValue.StringValue(action::class.qualifiedName ?: "unknown")
             )
         )
     }
