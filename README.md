@@ -22,7 +22,7 @@ Add the dependency to your `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("io.github.crowded-innovations.duks:duks-ga4:0.1.0")
+    implementation("io.github.crowded-libs:duks-ga4:0.1.0")
 }
 ```
 ## Quick Start
