@@ -1,9 +1,11 @@
 package duks.ga4.middleware
 
 import duks.*
+import duks.ga4.client.EventQueueStore
 import duks.ga4.client.GA4Client
 import duks.ga4.client.IGA4Client
 import duks.ga4.config.GA4Config
+import duks.ga4.model.ContextProvider
 import duks.ga4.model.EventParamValue
 import duks.ga4.model.GA4Event
 import duks.ga4.model.UserPropertyValue
@@ -17,7 +19,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.time.Clock
 import kotlin.time.Duration
-import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 
 /**
@@ -47,6 +48,8 @@ class GA4Middleware<TState : StateModel>(
     private val userPropertiesProvider: suspend (TState) -> Map<String, UserPropertyValue>? = { null },
     private val clientFactory: (() -> IGA4Client)? = null,
     private val consentManager: ConsentManager? = null,
+    private val contextProvider: ContextProvider? = null,
+    private val eventQueueStore: EventQueueStore? = null,
     private val scope: CoroutineScope
 ) : Middleware<TState>, StoreLifecycleAware<TState> {
 
@@ -87,6 +90,8 @@ class GA4Middleware<TState : StateModel>(
                     config = config.copy(flushInterval = flushInterval),
                     scope = scope,
                     consentManager = consentManager,
+                    contextProvider = contextProvider,
+                    eventQueueStore = eventQueueStore,
                     flushInterval = flushInterval
                 )
                 ga4Client = newClient

@@ -1,10 +1,12 @@
 package duks.ga4.middleware
 
 import duks.*
+import duks.ga4.client.EventQueueStore
 import duks.ga4.client.IGA4Client
 import duks.ga4.config.GA4Config
 import duks.ga4.config.PrivacyConfig
 import duks.ga4.config.ValidationMode
+import duks.ga4.model.ContextProvider
 import duks.ga4.model.UserPropertyValue
 import duks.ga4.privacy.ConsentManager
 import duks.ga4.privacy.ConsentStorage
@@ -37,6 +39,8 @@ class GA4MiddlewareBuilder<TState : StateModel> {
     private var privacyConfig: PrivacyConfig? = null
     private var routerMiddleware: RouterMiddleware<TState>? = null
     private var clientFactory: (() -> IGA4Client)? = null
+    private var contextProvider: ContextProvider? = null
+    private var eventQueueStore: EventQueueStore? = null
     
     private val customMappers = mutableListOf<EventMapper<TState>>()
     private val actionFilters = mutableListOf<(Any) -> Boolean>()
@@ -130,6 +134,20 @@ class GA4MiddlewareBuilder<TState : StateModel> {
      */
     internal fun clientFactory(factory: () -> IGA4Client) = apply {
         this.clientFactory = factory
+    }
+
+    /**
+     * Optional device / geo / IP context attached to Measurement Protocol requests.
+     */
+    fun contextProvider(provider: ContextProvider) = apply {
+        this.contextProvider = provider
+    }
+
+    /**
+     * Optional durable event queue (e.g. app-provided kotlin-lmdb adapter).
+     */
+    fun eventQueueStore(store: EventQueueStore) = apply {
+        this.eventQueueStore = store
     }
     
     /**
@@ -230,6 +248,8 @@ class GA4MiddlewareBuilder<TState : StateModel> {
             userPropertiesProvider = userPropertiesProvider,
             clientFactory = clientFactory,
             consentManager = if (enablePrivacy) consentManager else null,
+            contextProvider = contextProvider,
+            eventQueueStore = eventQueueStore,
             scope = scope
         )
         
