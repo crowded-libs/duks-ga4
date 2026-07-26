@@ -54,7 +54,8 @@ class EventBatcher(
     suspend fun addEvent(
         event: GA4Event,
         clientId: String? = null,
-        userId: String? = null
+        userId: String? = null,
+        userProperties: Map<String, duks.ga4.model.UserPropertyValue>? = null
     ): Boolean = queueMutex.withLock {
         if (eventQueue.size >= maxQueueSize) {
             return@withLock false
@@ -64,7 +65,8 @@ class EventBatcher(
             event = event,
             queuedAt = Clock.System.now(),
             clientId = clientId,
-            userId = userId
+            userId = userId,
+            userProperties = userProperties
         )
         
         // Check for duplicates

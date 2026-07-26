@@ -121,7 +121,8 @@ class RoutingAnalyticsTest {
             event: GA4Event,
             clientId: String?,
             userId: String?,
-            immediate: Boolean
+            immediate: Boolean,
+            userProperties: Map<String, duks.ga4.model.UserPropertyValue>?
         ): Result<Unit> {
             sentEvents.add(event)
             return Result.success(Unit)
@@ -131,7 +132,8 @@ class RoutingAnalyticsTest {
             events: List<GA4Event>,
             clientId: String?,
             userId: String?,
-            immediate: Boolean
+            immediate: Boolean,
+            userProperties: Map<String, duks.ga4.model.UserPropertyValue>?
         ): Result<Unit> {
             sentEvents.addAll(events)
             return Result.success(Unit)

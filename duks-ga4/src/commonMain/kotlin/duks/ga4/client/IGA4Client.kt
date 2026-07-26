@@ -13,7 +13,8 @@ interface IGA4Client {
         event: GA4Event,
         clientId: String? = null,
         userId: String? = null,
-        immediate: Boolean = false
+        immediate: Boolean = false,
+        userProperties: Map<String, duks.ga4.model.UserPropertyValue>? = null
     ): Result<Unit>
     
     /**
@@ -23,7 +24,8 @@ interface IGA4Client {
         events: List<GA4Event>,
         clientId: String? = null,
         userId: String? = null,
-        immediate: Boolean = false
+        immediate: Boolean = false,
+        userProperties: Map<String, duks.ga4.model.UserPropertyValue>? = null
     ): Result<Unit>
     
     /**

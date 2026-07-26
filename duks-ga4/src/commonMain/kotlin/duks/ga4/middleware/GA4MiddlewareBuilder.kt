@@ -4,6 +4,7 @@ import duks.*
 import duks.ga4.client.IGA4Client
 import duks.ga4.config.GA4Config
 import duks.ga4.config.PrivacyConfig
+import duks.ga4.model.UserPropertyValue
 import duks.ga4.privacy.ConsentManager
 import duks.ga4.privacy.ConsentStorage
 import duks.ga4.privacy.DefaultConsentManager
@@ -28,6 +29,7 @@ class GA4MiddlewareBuilder<TState : StateModel> {
     private var flushInterval: Duration = 10.seconds
     private var clientIdProvider: suspend (TState) -> String? = { null }
     private var userIdProvider: suspend (TState) -> String? = { null }
+    private var userPropertiesProvider: suspend (TState) -> Map<String, UserPropertyValue>? = { null }
     private var consentManager: ConsentManager? = null
     private var enablePrivacy: Boolean = false
     private var routerMiddleware: RouterMiddleware<TState>? = null
@@ -104,6 +106,13 @@ class GA4MiddlewareBuilder<TState : StateModel> {
      */
     fun userIdProvider(provider: suspend (TState) -> String?) = apply {
         this.userIdProvider = provider
+    }
+
+    /**
+     * Sets the user properties provider (attached to Measurement Protocol requests)
+     */
+    fun userPropertiesProvider(provider: suspend (TState) -> Map<String, UserPropertyValue>?) = apply {
+        this.userPropertiesProvider = provider
     }
     
     /**
@@ -193,6 +202,7 @@ class GA4MiddlewareBuilder<TState : StateModel> {
             flushInterval = flushInterval,
             clientIdProvider = clientIdProvider,
             userIdProvider = userIdProvider,
+            userPropertiesProvider = userPropertiesProvider,
             clientFactory = clientFactory,
             scope = scope
         )

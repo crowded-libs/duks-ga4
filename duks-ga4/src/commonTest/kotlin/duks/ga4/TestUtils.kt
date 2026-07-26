@@ -429,7 +429,8 @@ class MockGA4Client : duks.ga4.client.IGA4Client {
         event: GA4Event,
         clientId: String?,
         userId: String?,
-        immediate: Boolean
+        immediate: Boolean,
+        userProperties: Map<String, duks.ga4.model.UserPropertyValue>?
     ): Result<Unit> {
         sendEventCallCount++
         if (failNextSend) {
@@ -445,7 +446,8 @@ class MockGA4Client : duks.ga4.client.IGA4Client {
         events: List<GA4Event>,
         clientId: String?,
         userId: String?,
-        immediate: Boolean
+        immediate: Boolean,
+        userProperties: Map<String, duks.ga4.model.UserPropertyValue>?
     ): Result<Unit> {
         sendEventsCallCount++
         if (failNextSend) {

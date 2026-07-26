@@ -81,7 +81,14 @@ val dokkaHtmlJar = tasks.register<Jar>("dokkaHtmlJar") {
 mavenPublishing {
     publishToMavenCentral()
 
-    signAllPublications()
+    // Sign only when credentials are present (Central/CI). mavenLocal iteration skips signing.
+    val canSign =
+        providers.gradleProperty("signing.keyId").orNull != null ||
+            providers.environmentVariable("ORG_GRADLE_PROJECT_signingInMemoryKey").orNull != null ||
+            providers.environmentVariable("SIGNING_KEY").orNull != null
+    if (canSign) {
+        signAllPublications()
+    }
 
     coordinates(group.toString(), "duks-ga4", version.toString())
 

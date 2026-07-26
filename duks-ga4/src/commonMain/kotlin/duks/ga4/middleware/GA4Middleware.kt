@@ -8,6 +8,7 @@ import duks.ga4.config.GA4Config
 import duks.ga4.model.BatchedEvent
 import duks.ga4.model.EventParamValue
 import duks.ga4.model.GA4Event
+import duks.ga4.model.UserPropertyValue
 import duks.logging.*
 import duks.routing.*
 import kotlinx.coroutines.CoroutineScope
@@ -43,6 +44,7 @@ class GA4Middleware<TState : StateModel>(
     private val flushInterval: Duration = 10.seconds,
     private val clientIdProvider: suspend (TState) -> String? = { null },
     private val userIdProvider: suspend (TState) -> String? = { null },
+    private val userPropertiesProvider: suspend (TState) -> Map<String, UserPropertyValue>? = { null },
     private val clientFactory: (() -> IGA4Client)? = null,
     private val scope: CoroutineScope
 ) : Middleware<TState>, StoreLifecycleAware<TState> {
@@ -193,12 +195,9 @@ class GA4Middleware<TState : StateModel>(
                     }
                 }
                 else -> {
-                    // Use default mapping
-                    if (!beforeStateChange) {
-                        defaultMapAction(action, state)
-                    } else {
-                        emptyList()
-                    }
+                    // No event mapper: do not track actions (routing analytics still works separately).
+                    // Opt in via DefaultEventMapper / patternMapper / custom EventMapper.
+                    emptyList()
                 }
             }
             
@@ -210,10 +209,11 @@ class GA4Middleware<TState : StateModel>(
                 
                 val clientId = clientIdProvider(state)
                 val userId = userIdProvider(state)
+                val userProperties = userPropertiesProvider(state)
                 
                 events.forEach { event ->
                     if (eventBatcher != null) {
-                        eventBatcher?.addEvent(event, clientId, userId)
+                        eventBatcher?.addEvent(event, clientId, userId, userProperties)
                     }
                 }
             }
@@ -222,58 +222,6 @@ class GA4Middleware<TState : StateModel>(
                 "Error processing action {actionType}"
             }
             handleError(GA4MiddlewareError.MappingError(action, e))
-        }
-    }
-    
-    private fun defaultMapAction(action: Any, state: TState): List<GA4Event> {
-        // Default mapping for common action patterns
-        return when (action) {
-            is AsyncProcessing -> {
-                // Map async actions
-                listOf(
-                    GA4Event(
-                        name = "async_action_started",
-                        params = mapOf(
-                            "action_type" to EventParamValue.StringValue(action.initiatedBy::class.simpleName ?: "unknown"),
-                            "status" to EventParamValue.StringValue("loading")
-                        )
-                    )
-                )
-            }
-            is AsyncResultAction<*> -> {
-                listOf(
-                    GA4Event(
-                        name = "async_action_completed",
-                        params = mapOf(
-                            "action_type" to EventParamValue.StringValue(action.initiatedBy::class.simpleName ?: "unknown"),
-                            "status" to EventParamValue.StringValue("success")
-                        )
-                    )
-                )
-            }
-            is AsyncError -> {
-                listOf(
-                    GA4Event(
-                        name = "async_action_failed",
-                        params = mapOf(
-                            "action_type" to EventParamValue.StringValue(action.initiatedBy::class.simpleName ?: "unknown"),
-                            "status" to EventParamValue.StringValue("error"),
-                            "error_message" to EventParamValue.StringValue(action.error.message ?: "Unknown error")
-                        )
-                    )
-                )
-            }
-            else -> {
-                // Generic action tracking
-                listOf(
-                    GA4Event(
-                        name = "action_dispatched",
-                        params = mapOf(
-                            "action_type" to EventParamValue.StringValue(action::class.simpleName ?: "unknown")
-                        )
-                    )
-                )
-            }
         }
     }
     
@@ -403,7 +351,8 @@ class GA4Middleware<TState : StateModel>(
                     events = events.map { it.event },
                     clientId = key.clientId,
                     userId = key.userId,
-                    immediate = true
+                    immediate = true,
+                    userProperties = events.firstNotNullOfOrNull { it.userProperties }
                 ).onFailure { error ->
                     logger.error(error, events.size) {
                         "Failed to send batch of {eventCount} events"

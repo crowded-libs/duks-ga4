@@ -70,7 +70,8 @@ class GA4Client(
         event: GA4Event,
         clientId: String?,
         userId: String?,
-        immediate: Boolean
+        immediate: Boolean,
+        userProperties: Map<String, duks.ga4.model.UserPropertyValue>?
     ): Result<Unit> = runCatching {
         val finalClientId = clientId 
             ?: config.defaultClientId 
@@ -82,11 +83,11 @@ class GA4Client(
         
         if (immediate) {
             // Send immediately without batching
-            val request = createRequest(listOf(event), finalClientId, userId)
+            val request = createRequest(listOf(event), finalClientId, userId, userProperties)
             sendRequest(request)
         } else {
             // Add to batch
-            val added = batcher.addEvent(event, finalClientId, userId)
+            val added = batcher.addEvent(event, finalClientId, userId, userProperties)
             if (!added) {
                 logger.warn(event.name) { 
                     "Event queue is full, cannot add event: {eventName}" 
@@ -103,7 +104,8 @@ class GA4Client(
         events: List<GA4Event>,
         clientId: String?,
         userId: String?,
-        immediate: Boolean
+        immediate: Boolean,
+        userProperties: Map<String, duks.ga4.model.UserPropertyValue>?
     ): Result<Unit> = runCatching {
         require(events.isNotEmpty()) { "Events list cannot be empty" }
         
@@ -118,7 +120,7 @@ class GA4Client(
         if (immediate) {
             // Send immediately in batches
             events.chunked(config.maxEventsPerBatch).forEach { batch ->
-                val request = createRequest(batch, finalClientId, userId)
+                val request = createRequest(batch, finalClientId, userId, userProperties)
                 sendRequest(request)
             }
         } else {
@@ -169,7 +171,8 @@ class GA4Client(
             val userId = events.firstOrNull { it.userId != null }?.userId
             
             try {
-                val request = createRequest(ga4Events, clientId, userId)
+                val userProperties = events.firstNotNullOfOrNull { it.userProperties }
+                val request = createRequest(ga4Events, clientId, userId, userProperties)
                 sendRequest(request)
             } catch (e: Exception) {
                 // Handle retry for failed events
@@ -193,12 +196,14 @@ class GA4Client(
     private fun createRequest(
         events: List<GA4Event>,
         clientId: String,
-        userId: String? = null
+        userId: String? = null,
+        userProperties: Map<String, duks.ga4.model.UserPropertyValue>? = null
     ): GA4Request {
         return GA4Request(
             clientId = clientId,
             userId = userId,
             timestampMicros = Clock.System.now().toEpochMilliseconds() * 1000,
+            userProperties = userProperties,
             consent = config.defaultConsent,
             events = events
         )

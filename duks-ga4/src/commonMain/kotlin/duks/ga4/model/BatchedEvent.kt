@@ -27,6 +27,11 @@ data class BatchedEvent(
      * Optional user ID for this specific event
      */
     val userId: String? = null,
+
+    /**
+     * Optional user properties captured when the event was queued
+     */
+    val userProperties: Map<String, UserPropertyValue>? = null,
     
     /**
      * Number of retry attempts for this event

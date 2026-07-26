@@ -432,11 +432,10 @@ class GA4MiddlewareTest {
     }
     
     @Test
-    fun `should use default event mapper when none provided`() =  runTest(timeout = 5.seconds) {
-        // Test without custom event mapper
+    fun `should not map actions when no event mapper provided`() = runTest(timeout = 5.seconds) {
         middleware = GA4Middleware(
             config = config,
-            eventMapper = null, // Use default mapping
+            eventMapper = null,
             clientFactory = { mockClient },
             scope = backgroundScope
         )
@@ -460,17 +459,54 @@ class GA4MiddlewareTest {
             }
         }
         
-        // Manually initialize middleware
         middleware.onStoreCreated(store)
-        
-        // Test async action
-        val loadingAction = duks.AsyncProcessing(TestAction.Load("test"))
-        store.dispatch(loadingAction)
-        
-        // Give a small delay for processing
+
+        store.dispatch(duks.AsyncProcessing(TestAction.Load("test")))
+        store.dispatch(TestAction.Tracked("noise"))
         delay(100)
-        
-        // Default mapper should handle async actions
+        middleware.flushEvents()
+        delay(50)
+
+        assertTrue(mockClient.sentEvents.isEmpty(), "Expected no action events without a mapper")
+    }
+
+    @Test
+    fun `should use DefaultEventMapper when explicitly provided`() = runTest(timeout = 5.seconds) {
+        middleware = GA4Middleware(
+            config = config,
+            eventMapper = DefaultEventMapper(),
+            clientFactory = { mockClient },
+            scope = backgroundScope
+        )
+
+        val testMiddleware = object : duks.Middleware<TestState> {
+            override suspend fun invoke(
+                store: duks.KStore<TestState>,
+                next: suspend (duks.Action) -> duks.Action,
+                action: duks.Action
+            ): duks.Action {
+                return middleware.invoke(store, next, action)
+            }
+        }
+
+        val store = duks.createStore(TestState()) {
+            scope(backgroundScope)
+            reduceWith { state, action -> state }
+            middleware {
+                middleware(testMiddleware)
+            }
+        }
+
+        middleware.onStoreCreated(store)
+        store.dispatch(duks.AsyncProcessing(TestAction.Load("test")))
+        delay(100)
+        middleware.flushEvents()
+        delay(50)
+
+        assertTrue(
+            mockClient.sentEvents.any { it.name == "async_action" },
+            "DefaultEventMapper should emit async_action events"
+        )
     }
     
     @Test
@@ -772,7 +808,7 @@ class GA4MiddlewareTest {
     fun `should map different async action states with default mapper`() =  runTest(timeout = 5.seconds) {
         middleware = GA4Middleware(
             config = config,
-            eventMapper = null, // Use default mapper
+            eventMapper = DefaultEventMapper(),
             clientFactory = { mockClient },
             scope = backgroundScope
         )
