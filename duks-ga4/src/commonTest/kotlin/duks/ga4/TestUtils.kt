@@ -326,6 +326,9 @@ class TestEventMapper<TState> : duks.ga4.middleware.EventMapper<TState> {
     val mappedActions = mutableListOf<Any>()
     @kotlin.concurrent.Volatile var mapBeforeCallCount = 0
     @kotlin.concurrent.Volatile var mapAfterCallCount = 0
+
+    /** Tests exercise before-mapping; keep it on the hot path. */
+    override val mapsBeforeStateChange: Boolean = true
     
     // Flow to track when mapAfter is called
     private val _mapAfterFlow = MutableSharedFlow<Unit>()

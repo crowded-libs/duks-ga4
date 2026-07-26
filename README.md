@@ -6,16 +6,15 @@ A Kotlin Multiplatform library for Google Analytics 4 (GA4) integration with the
 
 ## Features
 
-- **Kotlin Multiplatform Support**: Works on Android, iOS, JVM, and JS/WASM platforms
-- **GA4 Measurement Protocol**: Direct integration with Google Analytics 4
-- **duks Middleware Integration**: Automatic action tracking and state-based analytics
-- **Privacy & GDPR Compliance**: Built-in consent management and PII scrubbing
-- **Event Batching**: Efficient event batching with configurable flush intervals
-- **Routing Analytics**: Automatic screen view and navigation tracking with duks-routing
-- **Type-Safe Events**: Strongly typed event parameters and validation
-- **Debug Mode**: Built-in validation and debugging support
-- **In-memory queuing**: Event batching with retry (process-local; not durable across restarts unless you supply storage)
-- **Session params**: Automatic `session_id` and `engagement_time_msec` for Realtime / engaged sessions
+- **Kotlin Multiplatform**: Android, iOS, JVM, WASM
+- **GA4 Measurement Protocol**: Correct wire-format params, consent, device/geo
+- **duks middleware**: Action → event mapping, single client-owned queue
+- **Recommended events**: Typed helpers for ecommerce and engagement
+- **Routing analytics**: Screen views, navigation, modals, tabs via duks-routing
+- **Sessions**: Auto `session_id` + `engagement_time_msec` for Realtime metrics
+- **Privacy (opt-in)**: Consent gating and PII scrubbing when enabled
+- **Queuing**: In-memory batch + retry; optional `EventQueueStore` for durability
+- **Validation**: Reserved-name checks and debug endpoint support
 
 ## Installation
 

@@ -518,6 +518,8 @@ class GA4MiddlewareTest {
         
         // Create mapper that throws error only on mapActionAfter
         val errorMapper = object : EventMapper<TestState> {
+            override val mapsBeforeStateChange: Boolean = true
+
             override suspend fun mapActionBefore(action: Any, state: TestState): List<GA4Event> {
                 mapperBeforeCalled = true
                 return emptyList()

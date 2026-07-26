@@ -4,11 +4,16 @@ import duks.ga4.client.GA4Client
 import duks.ga4.client.IGA4Client
 import duks.ga4.config.GA4Config
 import duks.ga4.model.GA4Event
-import io.ktor.client.engine.*
-import kotlinx.coroutines.*
+import duks.logging.Logger
+import duks.logging.error
+import io.ktor.client.engine.HttpClientEngine
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 
 /**
- * Simplified GA4 tracking function that can be used without duks middleware
+ * Lightweight GA4 tracker for use outside a duks store (scripts, services, tests).
+ *
+ * Does not cancel [scope] on [close] — the scope is owned by the caller.
  */
 class SimpleGA4Tracker(
     private val config: GA4Config,
@@ -16,52 +21,54 @@ class SimpleGA4Tracker(
     engine: HttpClientEngine? = null,
     private val scope: CoroutineScope
 ) {
+    private val logger = Logger.default()
     private val ga4Client: IGA4Client = GA4Client(config, engine, scope)
 
     /**
-     * Track an action
+     * Map [action] through [eventMapper] (if any) and enqueue resulting events.
      */
     fun trackAction(action: Any, state: Any? = null) {
         scope.launch {
             try {
-                val events = eventMapper?.mapActionAfter(action, state ?: Unit) ?: emptyList()
-                events.forEach { event ->
-                    ga4Client.sendEvent(event)
+                val events = eventMapper?.mapActionAfter(action, state ?: Unit).orEmpty()
+                if (events.isNotEmpty()) {
+                    ga4Client.sendEvents(events, immediate = false)
                 }
             } catch (e: Exception) {
-                // Error tracking disabled
+                logger.error(e) { "SimpleGA4Tracker.trackAction failed" }
             }
         }
     }
-    
+
     /**
-     * Track a custom event
+     * Enqueue a custom event (batched).
      */
     fun trackEvent(event: GA4Event) {
         scope.launch {
-            ga4Client.sendEvent(event)
+            ga4Client.sendEvent(event, immediate = false).onFailure { e ->
+                logger.error(e) { "SimpleGA4Tracker.trackEvent failed" }
+            }
         }
     }
-    
+
     /**
-     * Flush pending events
+     * Flush pending events.
      */
     suspend fun flush() {
         ga4Client.flush()
     }
-    
+
     /**
-     * Close the tracker
+     * Flush and close the underlying client. Does not cancel [scope].
      */
     suspend fun close() {
         flush()
         ga4Client.close()
-        scope.cancel()
     }
 }
 
 /**
- * Creates a simple GA4 tracker
+ * Creates a simple GA4 tracker for non-store usage.
  */
 fun simpleGA4Tracker(
     config: GA4Config,

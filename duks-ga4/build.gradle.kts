@@ -42,9 +42,9 @@ kotlin {
         }
         commonMain {
             dependencies {
+                // Compose Compiler needs runtime on the classpath. Prefer runtime only —
+                // foundation/ui come transitively via duks-routing when needed.
                 implementation(libs.compose.runtime)
-                implementation(libs.compose.foundation)
-                implementation(libs.compose.ui)
                 implementation(libs.duks)
                 implementation(libs.duks.routing)
                 implementation(libs.kotlinx.coroutines.core)

@@ -117,13 +117,23 @@ class GA4Middleware<TState : StateModel>(
             onStoreCreated(store)
         }
 
+        // Action-based routing only when not subscribed to RouterMiddleware.state
+        // (direct subscription avoids double-firing the same navigation).
         if (enableRoutingAnalytics && routerMiddleware == null && action is Routing.StateChanged) {
             handleRoutingStateChanged(action.routerState)
         }
 
-        processAction(action, store.state.value, beforeStateChange = true)
+        val mapper = eventMapper
+        // Skip pre-state mapping when no mapper, or mapper only cares about after.
+        if (mapper != null && mapper.mapsBeforeStateChange) {
+            processAction(action, store.state.value, beforeStateChange = true)
+        }
+
         val result = next(action)
-        processAction(action, store.state.value, beforeStateChange = false)
+
+        if (mapper != null) {
+            processAction(action, store.state.value, beforeStateChange = false)
+        }
 
         return result
     }
@@ -163,16 +173,12 @@ class GA4Middleware<TState : StateModel>(
         state: TState,
         beforeStateChange: Boolean
     ) {
+        val mapper = eventMapper ?: return
         try {
-            val events = when {
-                eventMapper != null -> {
-                    if (beforeStateChange) {
-                        eventMapper.mapActionBefore(action, state)
-                    } else {
-                        eventMapper.mapActionAfter(action, state)
-                    }
-                }
-                else -> emptyList()
+            val events = if (beforeStateChange) {
+                mapper.mapActionBefore(action, state)
+            } else {
+                mapper.mapActionAfter(action, state)
             }
 
             if (events.isNotEmpty()) {
@@ -190,24 +196,24 @@ class GA4Middleware<TState : StateModel>(
     }
 
     private suspend fun enqueueEvents(events: List<GA4Event>, state: TState?) {
+        if (events.isEmpty()) return
         val client = ga4Client ?: return
         val clientId = state?.let { clientIdProvider(it) }
         val userId = state?.let { userIdProvider(it) }
         val userProperties = state?.let { userPropertiesProvider(it) }
 
-        events.forEach { event ->
-            client.sendEvent(
-                event = event,
-                clientId = clientId,
-                userId = userId,
-                immediate = false,
-                userProperties = userProperties
-            ).onFailure { error ->
-                logger.error(error, event.name) {
-                    "Failed to enqueue event {eventName}"
-                }
-                handleError(GA4MiddlewareError.SendError(listOf(event), error))
+        // Single batch enqueue is cheaper than N individual sendEvent calls
+        client.sendEvents(
+            events = events,
+            clientId = clientId,
+            userId = userId,
+            immediate = false,
+            userProperties = userProperties
+        ).onFailure { error ->
+            logger.error(error, events.size) {
+                "Failed to enqueue {eventCount} events"
             }
+            handleError(GA4MiddlewareError.SendError(events, error))
         }
     }
 
@@ -387,12 +393,16 @@ private fun createNavigationEvent(routerState: RouterState, fromRoute: String): 
         else -> NavigationType.PUSH
     }
 
+    val toScreen = convertToScreenName(routerState) ?: "unknown"
+    val pattern = detectNavigationPattern(fromRoute, toScreen)
+
     return GA4Event(
         name = "navigation",
         params = buildMap {
             put("from_screen", EventParamValue.StringValue(fromRoute))
-            put("to_screen", EventParamValue.StringValue(convertToScreenName(routerState) ?: "unknown"))
+            put("to_screen", EventParamValue.StringValue(toScreen))
             put("navigation_type", EventParamValue.StringValue(navigationType.analyticsName))
+            put("navigation_pattern", EventParamValue.StringValue(pattern.analyticsName))
             routerState.lastRouteType?.let { routeType ->
                 put("route_type", EventParamValue.StringValue(routeType.name.lowercase()))
             }

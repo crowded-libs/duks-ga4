@@ -16,6 +16,13 @@ import kotlin.time.Clock
  */
 interface EventMapper<TState> {
     /**
+     * When false, middleware skips the pre-reducer mapping call on the hot path.
+     * Default is false (most mappers only care about post-state).
+     * Override to true if you implement [mapActionBefore].
+     */
+    val mapsBeforeStateChange: Boolean get() = false
+
+    /**
      * Maps an action to GA4 events before the state change
      * 
      * @param action The dispatched action
@@ -111,7 +118,9 @@ open class DefaultEventMapper<TState> : EventMapper<TState> {
 class CompositeEventMapper<TState>(
     private val mappers: List<EventMapper<TState>>
 ) : EventMapper<TState> {
-    
+    override val mapsBeforeStateChange: Boolean =
+        mappers.any { it.mapsBeforeStateChange }
+
     override suspend fun mapActionBefore(action: Any, state: TState): List<GA4Event> {
         return mappers.flatMap { it.mapActionBefore(action, state) }
     }
@@ -128,7 +137,9 @@ class FilteringEventMapper<TState>(
     private val delegate: EventMapper<TState>,
     private val shouldMapAction: (Any) -> Boolean
 ) : EventMapper<TState> {
-    
+    override val mapsBeforeStateChange: Boolean
+        get() = delegate.mapsBeforeStateChange
+
     override suspend fun mapActionBefore(action: Any, state: TState): List<GA4Event> {
         return if (shouldMapAction(action)) {
             delegate.mapActionBefore(action, state)

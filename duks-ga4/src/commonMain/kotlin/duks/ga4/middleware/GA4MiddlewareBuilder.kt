@@ -243,7 +243,8 @@ class GA4MiddlewareBuilder<TState : StateModel> {
 }
 
 /**
- * Privacy-aware version of GA4Middleware that respects consent
+ * Privacy-aware wrapper that gates tracking on analytics consent while
+ * always forwarding store lifecycle (so detach/flush still runs).
  */
 private class PrivacyAwareGA4Middleware<TState : StateModel>(
     private val baseMiddleware: GA4Middleware<TState>,
@@ -259,11 +260,10 @@ private class PrivacyAwareGA4Middleware<TState : StateModel>(
         next: suspend (Action) -> Action,
         action: Action
     ): Action {
-        // Only track if analytics consent is granted
+        // Only track if analytics consent is granted; always pass the action through
         return if (consentManager.analyticsEnabled.value) {
             baseMiddleware.invoke(store, next, action)
         } else {
-            // Just pass through without tracking
             next(action)
         }
     }
