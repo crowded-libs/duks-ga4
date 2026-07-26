@@ -34,6 +34,7 @@ class GA4MiddlewareBuilder<TState : StateModel> {
     private var userPropertiesProvider: suspend (TState) -> Map<String, UserPropertyValue>? = { null }
     private var consentManager: ConsentManager? = null
     private var enablePrivacy: Boolean = false
+    private var privacyConfig: PrivacyConfig? = null
     private var routerMiddleware: RouterMiddleware<TState>? = null
     private var clientFactory: (() -> IGA4Client)? = null
     
@@ -157,23 +158,45 @@ class GA4MiddlewareBuilder<TState : StateModel> {
     }
     
     /**
-     * Enables privacy features with consent management
+     * Enables privacy features with consent management.
+     *
+     * Turns on consent enforcement + PII scrubbing on the client pipeline and
+     * gates middleware tracking when analytics consent is denied.
      */
     fun enablePrivacy(
         consentManager: ConsentManager? = null,
-        consentStorage: ConsentStorage? = null
+        consentStorage: ConsentStorage? = null,
+        scrubPii: Boolean = true
     ) = apply {
         this.enablePrivacy = true
         this.consentManager = consentManager ?: DefaultConsentManager(
             storage = consentStorage ?: InMemoryConsentStorage()
         )
+        // Merge privacy flags into config when present
+        config = config?.copy(
+            privacyConfig = (config?.privacyConfig ?: PrivacyConfig()).copy(
+                enforceConsent = true,
+                scrubPii = scrubPii
+            )
+        ) ?: config
+        privacyConfig = PrivacyConfig(enforceConsent = true, scrubPii = scrubPii)
     }
     
     /**
      * Builds the GA4 middleware
      */
     fun build(): Middleware<TState> {
-        val finalConfig = config ?: throw IllegalStateException("GA4 config is required")
+        var finalConfig = config ?: throw IllegalStateException("GA4 config is required")
+
+        if (enablePrivacy) {
+            val privacy = privacyConfig ?: PrivacyConfig(enforceConsent = true, scrubPii = true)
+            finalConfig = finalConfig.copy(
+                privacyConfig = privacy,
+                flushInterval = flushInterval
+            )
+        } else {
+            finalConfig = finalConfig.copy(flushInterval = flushInterval)
+        }
         
         // Combine all mappers
         val finalMapper = when {
@@ -195,7 +218,7 @@ class GA4MiddlewareBuilder<TState : StateModel> {
             finalMapper
         }
         
-        // Create base middleware
+        // Create base middleware — client owns the queue
         val baseMiddleware = GA4Middleware(
             config = finalConfig,
             eventMapper = filteredMapper,
@@ -206,10 +229,11 @@ class GA4MiddlewareBuilder<TState : StateModel> {
             userIdProvider = userIdProvider,
             userPropertiesProvider = userPropertiesProvider,
             clientFactory = clientFactory,
+            consentManager = if (enablePrivacy) consentManager else null,
             scope = scope
         )
         
-        // Wrap with privacy if needed
+        // Wrap with privacy if needed (middleware-level gate)
         return if (enablePrivacy && consentManager != null) {
             PrivacyAwareGA4Middleware(baseMiddleware, consentManager!!)
         } else {

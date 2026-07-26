@@ -1,5 +1,6 @@
 package duks.ga4.privacy
 
+import duks.ga4.client.BatchDeliveryResult
 import duks.ga4.client.EventBatcher
 import duks.ga4.config.GA4Config
 import duks.ga4.model.BatchedEvent
@@ -16,7 +17,10 @@ import kotlin.time.Duration
 
 /**
  * Event batcher that respects user consent and privacy settings.
- * 
+ *
+ * Prefer wiring scrubbing/consent on [duks.ga4.client.GA4Client] via PrivacyConfig
+ * for new code; this wrapper remains for advanced pending-event collection.
+ *
  * This class wraps the standard EventBatcher and adds:
  * - Consent checking before processing events
  * - PII scrubbing if enabled
@@ -26,7 +30,7 @@ import kotlin.time.Duration
 class ConsentAwareEventBatcher(
     private val config: GA4Config,
     private val consentManager: ConsentManager,
-    private val onBatchReady: suspend (List<BatchedEvent>) -> Unit,
+    private val onBatchReady: suspend (List<BatchedEvent>) -> BatchDeliveryResult,
     flushInterval: Duration,
     maxQueueSize: Int = 1000,
     private val eventStore: InMemoryEventStore? = null,
@@ -142,7 +146,7 @@ class ConsentAwareEventBatcher(
      * Clears the event queue
      */
     suspend fun clearQueue() {
-        // eventBatcher.clearQueue() // This method doesn't exist in EventBatcher
+        eventBatcher.clear()
         pendingEvents.clear()
     }
     
@@ -154,9 +158,9 @@ class ConsentAwareEventBatcher(
         scope.cancel()
     }
     
-    private suspend fun processBatchWithConsent(batch: List<BatchedEvent>) {
+    private suspend fun processBatchWithConsent(batch: List<BatchedEvent>): BatchDeliveryResult {
         // Double-check consent before sending
-        if (checkConsent()) {
+        return if (checkConsent()) {
             logger.debug(batch.size) {
                 "Processing batch of {batchSize} events with consent"
             }
@@ -166,6 +170,8 @@ class ConsentAwareEventBatcher(
                 "Dropping batch of {batchSize} events due to lack of consent"
             }
             _droppedEvents.value += batch.size
+            // Treat as success so events are not requeued without consent
+            BatchDeliveryResult.Success
         }
     }
     

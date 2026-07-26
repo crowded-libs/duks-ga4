@@ -39,8 +39,9 @@ class EventBatcherTest {
     fun `should add single event to queue successfully`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
-            onBatchReady = { batch -> 
+            onBatchReady = { batch ->
                 batchMutex.withLock { sentBatches.add(batch) }
+                BatchDeliveryResult.Success
             },
             scope = backgroundScope
         )
@@ -56,8 +57,9 @@ class EventBatcherTest {
     fun `should add multiple events to queue and track count`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
-            onBatchReady = { batch -> 
+            onBatchReady = { batch ->
                 batchMutex.withLock { sentBatches.add(batch) }
+                BatchDeliveryResult.Success
             },
             scope = backgroundScope
         )
@@ -73,10 +75,11 @@ class EventBatcherTest {
     fun `should automatically flush when batch size limit is reached`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
-            onBatchReady = { batch -> 
+            onBatchReady = { batch ->
                 batchMutex.withLock {
                     sentBatches.add(batch)
                 }
+                BatchDeliveryResult.Success
             },
             scope = backgroundScope
         )
@@ -101,8 +104,9 @@ class EventBatcherTest {
     fun `should flush events manually even when below batch size`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
-            onBatchReady = { batch -> 
+            onBatchReady = { batch ->
                 batchMutex.withLock { sentBatches.add(batch) }
+                BatchDeliveryResult.Success
             },
             scope = backgroundScope
         )
@@ -127,8 +131,9 @@ class EventBatcherTest {
     fun `should flush all events in multiple batches when exceeding batch size`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
-            onBatchReady = { batch -> 
+            onBatchReady = { batch ->
                 batchMutex.withLock { sentBatches.add(batch) }
+                BatchDeliveryResult.Success
             },
             scope = backgroundScope
         )
@@ -164,8 +169,9 @@ class EventBatcherTest {
         val overflowConfig = TestUtils.createTestConfig(batchSizeLimit = 20)
         batcher = EventBatcher(
             config = overflowConfig,
-            onBatchReady = { batch -> 
+            onBatchReady = { batch ->
                 batchMutex.withLock { sentBatches.add(batch) }
+                BatchDeliveryResult.Success
             },
             maxQueueSize = 10,
             flushInterval = 10.seconds, // Prevent auto-flush during test
@@ -189,8 +195,9 @@ class EventBatcherTest {
     fun `should allow duplicate events as new batched events have different IDs`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
-            onBatchReady = { batch -> 
+            onBatchReady = { batch ->
                 batchMutex.withLock { sentBatches.add(batch) }
+                BatchDeliveryResult.Success
             },
             scope = backgroundScope
         )
@@ -216,8 +223,9 @@ class EventBatcherTest {
     fun `should clear all events from queue without sending`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
-            onBatchReady = { batch -> 
+            onBatchReady = { batch ->
                 batchMutex.withLock { sentBatches.add(batch) }
+                BatchDeliveryResult.Success
             },
             scope = backgroundScope
         )
@@ -240,8 +248,9 @@ class EventBatcherTest {
     fun `should requeue failed events with incremented retry count`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
-            onBatchReady = { batch -> 
+            onBatchReady = { batch ->
                 batchMutex.withLock { sentBatches.add(batch) }
+                BatchDeliveryResult.Success
             },
             scope = backgroundScope
         )
@@ -276,8 +285,9 @@ class EventBatcherTest {
         val testConfig = config.copy(maxRetries = 2)
         batcher = EventBatcher(
             config = testConfig,
-            onBatchReady = { batch -> 
+            onBatchReady = { batch ->
                 batchMutex.withLock { sentBatches.add(batch) }
+                BatchDeliveryResult.Success
             },
             scope = backgroundScope
         )
@@ -308,6 +318,7 @@ class EventBatcherTest {
                     sentBatches.add(batch)
                     batchReceived = true
                 }
+                BatchDeliveryResult.Success
             },
             flushInterval = 100.milliseconds,
             scope = backgroundScope
@@ -338,8 +349,9 @@ class EventBatcherTest {
     fun `should handle concurrent event additions correctly`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
-            onBatchReady = { batch -> 
+            onBatchReady = { batch ->
                 batchMutex.withLock { sentBatches.add(batch) }
+                BatchDeliveryResult.Success
             },
             scope = backgroundScope
         )
@@ -371,8 +383,9 @@ class EventBatcherTest {
     fun `should update queue size state flow when events are added or removed`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
-            onBatchReady = { batch -> 
+            onBatchReady = { batch ->
                 batchMutex.withLock { sentBatches.add(batch) }
+                BatchDeliveryResult.Success
             },
             scope = backgroundScope
         )
@@ -399,6 +412,7 @@ class EventBatcherTest {
                 processingStarted = true
                 delay(100) // Simulate processing
                 batchMutex.withLock { sentBatches.add(batch) }
+                BatchDeliveryResult.Success
             },
             scope = backgroundScope
         )
@@ -432,8 +446,9 @@ class EventBatcherTest {
     fun `should include correct metadata in batched events`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
-            onBatchReady = { batch -> 
+            onBatchReady = { batch ->
                 batchMutex.withLock { sentBatches.add(batch) }
+                BatchDeliveryResult.Success
             },
             scope = backgroundScope
         )
@@ -459,8 +474,9 @@ class EventBatcherTest {
     fun `should stop auto-flush timer when batcher is stopped`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
-            onBatchReady = { batch -> 
+            onBatchReady = { batch ->
                 batchMutex.withLock { sentBatches.add(batch) }
+                BatchDeliveryResult.Success
             },
             scope = backgroundScope,
             flushInterval = 100.milliseconds
@@ -483,8 +499,9 @@ class EventBatcherTest {
     fun `should handle flush gracefully when queue is empty`() =  runTest(timeout = 5.seconds) {
         batcher = EventBatcher(
             config = config,
-            onBatchReady = { batch -> 
+            onBatchReady = { batch ->
                 batchMutex.withLock { sentBatches.add(batch) }
+                BatchDeliveryResult.Success
             },
             scope = backgroundScope
         )
@@ -495,6 +512,45 @@ class EventBatcherTest {
         // No batches should be sent
         batchMutex.withLock {
             assertEquals(0, sentBatches.size)
+        }
+    }
+
+    @Test
+    fun `should requeue events when delivery fails and not count them as sent`() = runTest(timeout = 5.seconds) {
+        var attempts = 0
+        batcher = EventBatcher(
+            config = config.copy(enableRetry = true, maxRetries = 3),
+            onBatchReady = { batch ->
+                attempts++
+                if (attempts == 1) {
+                    BatchDeliveryResult.Failure(
+                        cause = RuntimeException("network down"),
+                        retriable = batch
+                    )
+                } else {
+                    batchMutex.withLock { sentBatches.add(batch) }
+                    BatchDeliveryResult.Success
+                }
+            },
+            scope = backgroundScope,
+            flushInterval = 0.seconds // disable auto-flush
+        )
+
+        batcher.addEvent(TestUtils.createTestEvent("retry_me"), "client-1")
+        batcher.flush()
+
+        // After failure, event is requeued with retryCount=1
+        assertEquals(1, batcher.getQueueSize())
+        assertEquals(1, batcher.stats.value.failed)
+        assertEquals(1, batcher.stats.value.requeued)
+        assertEquals(0, batcher.stats.value.sent)
+
+        batcher.flush()
+        assertEquals(0, batcher.getQueueSize())
+        assertEquals(1, batcher.stats.value.sent)
+        batchMutex.withLock {
+            assertEquals(1, sentBatches.size)
+            assertEquals(1, sentBatches[0][0].retryCount)
         }
     }
 }

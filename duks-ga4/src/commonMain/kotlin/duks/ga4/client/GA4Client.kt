@@ -2,6 +2,8 @@ package duks.ga4.client
 
 import duks.ga4.config.GA4Config
 import duks.ga4.model.*
+import duks.ga4.privacy.ConsentManager
+import duks.ga4.privacy.PiiScrubber
 import duks.ga4.util.ClientIdGenerator
 import duks.logging.*
 import io.ktor.client.*
@@ -17,9 +19,14 @@ import kotlinx.coroutines.*
 import kotlin.time.Clock
 import kotlinx.serialization.json.Json
 import kotlin.math.pow
+import kotlin.time.Duration
 
 /**
- * Main client for sending events to Google Analytics 4
+ * Main client for sending events to Google Analytics 4.
+ *
+ * Owns the sole event queue ([EventBatcher]). Middleware and other callers should
+ * enqueue via [sendEvent]/[sendEvents] with `immediate = false` rather than
+ * maintaining a separate batcher.
  */
 class GA4Client(
     private val config: GA4Config,
@@ -27,9 +34,15 @@ class GA4Client(
     private val scope: CoroutineScope,
     private val sessionManager: SessionManager = DefaultSessionManager(
         sessionTimeout = config.sessionTimeout
-    )
+    ),
+    /**
+     * Optional consent manager. When [duks.ga4.config.PrivacyConfig.enforceConsent]
+     * is true and this is non-null, events are dropped without analytics consent.
+     */
+    private val consentManager: ConsentManager? = null,
+    flushInterval: Duration = config.flushInterval
 ) : IGA4Client {
-    
+
     private val logger = Logger.default()
 
     private val json = Json {
@@ -38,7 +51,7 @@ class GA4Client(
         isLenient = true
         explicitNulls = false
     }
-    
+
     private val httpClient = if (engine != null) {
         HttpClient(engine) {
             installDefaults()
@@ -62,28 +75,33 @@ class GA4Client(
             contentType(ContentType.Application.Json)
         }
     }
-    
+
     private val clientIdGenerator = ClientIdGenerator(config.clientIdStore)
     private val eventValidator = EventValidator(
         mode = config.validationMode,
         preferPageViewForWeb = config.preferPageViewForWeb
     )
-    
+    private val piiScrubber: PiiScrubber? =
+        if (config.privacyConfig.scrubPii) {
+            PiiScrubber(config.privacyConfig.piiScrubberConfig)
+        } else null
+
     private val batcher = EventBatcher(
         config = config,
-        onBatchReady = { batch -> sendBatch(batch) },
+        onBatchReady = { batch -> deliverBatch(batch) },
+        flushInterval = flushInterval,
         scope = scope
     )
-    
+
+    /** Snapshot of batcher stats (sent / failed / requeued / dropped). */
+    val batcherStats get() = batcher.stats
+
     init {
-        logger.info(config.measurementId, config.debugMode) { 
-            "GA4Client initialized with measurementId: {measurementId}, debugMode: {debugMode}" 
+        logger.info(config.measurementId, config.debugMode) {
+            "GA4Client initialized with measurementId: {measurementId}, debugMode: {debugMode}"
         }
     }
-    
-    /**
-     * Sends a single event to GA4
-     */
+
     override suspend fun sendEvent(
         event: GA4Event,
         clientId: String?,
@@ -91,6 +109,13 @@ class GA4Client(
         immediate: Boolean,
         userProperties: Map<String, duks.ga4.model.UserPropertyValue>?
     ): Result<Unit> = runCatching {
+        if (!hasAnalyticsConsent()) {
+            logger.debug(event.name) {
+                "Event dropped — analytics consent not granted: {eventName}"
+            }
+            return@runCatching
+        }
+
         val finalClientId = resolveClientId(clientId)
         val prepared = prepareEvents(listOf(event))
         if (prepared.isEmpty()) {
@@ -98,28 +123,25 @@ class GA4Client(
             return@runCatching
         }
         val preparedEvent = prepared.single()
-        
-        logger.debug(preparedEvent.name, finalClientId, immediate) { 
-            "Sending event: {eventName}, clientId: {clientId}, immediate: {immediate}" 
+
+        logger.debug(preparedEvent.name, finalClientId, immediate) {
+            "Sending event: {eventName}, clientId: {clientId}, immediate: {immediate}"
         }
-        
+
         if (immediate) {
             val request = createRequest(listOf(preparedEvent), finalClientId, userId, userProperties)
             sendRequest(request)
         } else {
             val added = batcher.addEvent(preparedEvent, finalClientId, userId, userProperties)
             if (!added) {
-                logger.warn(preparedEvent.name) { 
-                    "Event queue is full, cannot add event: {eventName}" 
+                logger.warn(preparedEvent.name) {
+                    "Event queue is full, cannot add event: {eventName}"
                 }
                 throw IllegalStateException("Event queue is full")
             }
         }
     }
-    
-    /**
-     * Sends multiple events to GA4
-     */
+
     override suspend fun sendEvents(
         events: List<GA4Event>,
         clientId: String?,
@@ -128,55 +150,59 @@ class GA4Client(
         userProperties: Map<String, duks.ga4.model.UserPropertyValue>?
     ): Result<Unit> = runCatching {
         require(events.isNotEmpty()) { "Events list cannot be empty" }
-        
+
+        if (!hasAnalyticsConsent()) {
+            logger.debug(events.size) {
+                "Batch of {count} events dropped — analytics consent not granted"
+            }
+            return@runCatching
+        }
+
         val finalClientId = resolveClientId(clientId)
         val prepared = prepareEvents(events)
         if (prepared.isEmpty()) {
             logger.warn(events.size) { "All {count} events dropped after validation" }
             return@runCatching
         }
-        
-        logger.debug(prepared.size, finalClientId, immediate) { 
-            "Sending {eventCount} events, clientId: {clientId}, immediate: {immediate}" 
+
+        logger.debug(prepared.size, finalClientId, immediate) {
+            "Sending {eventCount} events, clientId: {clientId}, immediate: {immediate}"
         }
-        
+
         if (immediate) {
             prepared.chunked(config.maxEventsPerBatch).forEach { batch ->
                 val request = createRequest(batch, finalClientId, userId, userProperties)
                 sendRequest(request)
             }
         } else {
-            val added = batcher.addEvents(prepared, finalClientId, userId)
+            val added = batcher.addEvents(prepared, finalClientId, userId, userProperties)
             if (added < prepared.size) {
-                logger.warn(added, prepared.size) { 
-                    "Could only add {added} of {total} events to queue" 
+                logger.warn(added, prepared.size) {
+                    "Could only add {added} of {total} events to queue"
                 }
                 throw IllegalStateException("Could only add $added of ${prepared.size} events to queue")
             }
         }
     }
-    
-    /**
-     * Flushes all pending events
-     */
+
     override suspend fun flush() {
         logger.debug { "Flushing all pending events" }
         batcher.flushAll()
     }
-    
-    /**
-     * Gets the current number of events in the queue
-     */
+
     override suspend fun getQueueSize(): Int = batcher.getQueueSize()
-    
-    /**
-     * Closes the client and releases resources
-     */
+
     override suspend fun close() {
         logger.info { "Closing GA4Client" }
         flush()
         batcher.stop()
         httpClient.close()
+    }
+
+    private fun hasAnalyticsConsent(): Boolean {
+        if (!config.privacyConfig.enforceConsent) return true
+        val manager = consentManager ?: return true
+        return manager.analyticsEnabled.value
     }
 
     private suspend fun resolveClientId(clientId: String?): String {
@@ -190,14 +216,20 @@ class GA4Client(
     }
 
     /**
-     * Validates events and attaches session/engagement params when configured.
+     * Scrubs (opt-in), attaches session params, validates.
      */
     private fun prepareEvents(events: List<GA4Event>): List<GA4Event> {
-        val withSession = if (config.attachSessionParams) {
-            val sid = sessionManager.touch()
-            events.map { attachSessionParams(it, sid) }
+        val scrubbed = if (piiScrubber != null) {
+            events.map { piiScrubber.scrubEvent(it) }
         } else {
             events
+        }
+
+        val withSession = if (config.attachSessionParams) {
+            val sid = sessionManager.touch()
+            scrubbed.map { attachSessionParams(it, sid) }
+        } else {
+            scrubbed
         }
         return eventValidator.validate(withSession)
     }
@@ -207,7 +239,6 @@ class GA4Client(
         var changed = false
 
         if (!params.containsKey("session_id")) {
-            // GA4 accepts string or number; use numeric string of epoch seconds
             params["session_id"] = EventParamValue.StringValue(sessionId)
             changed = true
         }
@@ -219,12 +250,11 @@ class GA4Client(
 
         return if (changed) event.copy(params = params) else event
     }
-    
+
     /**
-     * Sends a batch of events
+     * Transport for a dequeued batch. Does not requeue — [EventBatcher] owns retries.
      */
-    private suspend fun sendBatch(batch: List<BatchedEvent>) {
-        // Group events by client ID
+    private suspend fun deliverBatch(batch: List<BatchedEvent>): BatchDeliveryResult {
         val groupedEvents = mutableMapOf<String, MutableList<BatchedEvent>>()
         for (event in batch) {
             val key = event.clientId
@@ -232,34 +262,36 @@ class GA4Client(
                 ?: clientIdGenerator.getOrCreate()
             groupedEvents.getOrPut(key) { mutableListOf() }.add(event)
         }
-        
+
+        val failed = mutableListOf<BatchedEvent>()
+        var lastError: Throwable? = null
+
         for ((clientId, events) in groupedEvents) {
             val ga4Events = events.map { it.event }
             val userId = events.firstOrNull { it.userId != null }?.userId
-            
             try {
                 val userProperties = events.firstNotNullOfOrNull { it.userProperties }
                 val request = createRequest(ga4Events, clientId, userId, userProperties)
                 sendRequest(request)
             } catch (e: Exception) {
-                // Handle retry for failed events
-                if (config.enableRetry) {
-                    val failedEvents = events.filter { it.retryCount < config.maxRetries }
-                    if (failedEvents.isNotEmpty()) {
-                        batcher.requeueEvents(failedEvents)
-                    }
-                }
-                
-                logger.error(e, ga4Events.size, clientId) { 
-                    "Failed to send batch of {eventCount} events for clientId: {clientId}" 
+                lastError = e
+                failed.addAll(events)
+                logger.error(e, ga4Events.size, clientId) {
+                    "Failed to send batch of {eventCount} events for clientId: {clientId}"
                 }
             }
         }
+
+        return if (failed.isEmpty()) {
+            BatchDeliveryResult.Success
+        } else {
+            BatchDeliveryResult.Failure(
+                cause = lastError ?: GA4ClientException("Batch delivery failed"),
+                retriable = failed
+            )
+        }
     }
-    
-    /**
-     * Creates a GA4 request from events
-     */
+
     private fun createRequest(
         events: List<GA4Event>,
         clientId: String,
@@ -275,17 +307,14 @@ class GA4Client(
             events = events
         )
     }
-    
-    /**
-     * Sends a request to GA4 with retry logic
-     */
+
     private suspend fun sendRequest(request: GA4Request) {
         val endpoint = when {
             config.customEndpoint != null -> config.customEndpoint
             config.debugMode -> GA4Config.DEBUG_ENDPOINT
             else -> GA4Config.DEFAULT_ENDPOINT
         }
-        
+
         val url = buildString {
             append(endpoint)
             append("?measurement_id=")
@@ -293,22 +322,21 @@ class GA4Client(
             append("&api_secret=")
             append(config.apiSecret)
         }
-        
+
         var lastException: Exception? = null
         var retryCount = 0
         val maxRetries = if (config.enableRetry) config.maxRetries else 0
-        
+
         while (retryCount <= maxRetries) {
             try {
                 val response = httpClient.post(url) {
                     setBody(request)
                 }
-                
+
                 if (response.status.isSuccess()) {
-                    logger.debug(request.events.size) { 
-                        "Successfully sent {eventCount} events to GA4" 
+                    logger.debug(request.events.size) {
+                        "Successfully sent {eventCount} events to GA4"
                     }
-                    // In debug mode, parse validation messages
                     if (config.debugMode) {
                         try {
                             val ga4Response = response.body<GA4Response>()
@@ -316,30 +344,29 @@ class GA4Client(
                                 ga4Response.validationMessages.forEach { message ->
                                     when (message.validationCode?.uppercase()) {
                                         "ERROR", "VALUE_INVALID", "NAME_INVALID" -> logger.error(
-                                            message.fieldPath ?: "Unknown field", 
+                                            message.fieldPath ?: "Unknown field",
                                             message.description ?: "No description"
                                         ) { "GA4 Validation - {fieldPath}: {description}" }
                                         "WARNING" -> logger.warn(
-                                            message.fieldPath ?: "Unknown field", 
+                                            message.fieldPath ?: "Unknown field",
                                             message.description ?: "No description"
                                         ) { "GA4 Validation - {fieldPath}: {description}" }
                                         else -> logger.info(
-                                            message.fieldPath ?: "Unknown field", 
+                                            message.fieldPath ?: "Unknown field",
                                             message.description ?: "No description"
                                         ) { "GA4 Validation - {fieldPath}: {description}" }
                                     }
                                 }
                             }
-                        } catch (e: Exception) {
-                            // Debug endpoint might return empty response on success
+                        } catch (_: Exception) {
                             logger.debug { "Debug response parsing failed, likely successful" }
                         }
                     }
                     return
                 } else {
                     val errorBody = response.bodyAsText()
-                    logger.error(response.status.value, errorBody) { 
-                        "Request failed with status {statusCode}: {errorBody}" 
+                    logger.error(response.status.value, errorBody) {
+                        "Request failed with status {statusCode}: {errorBody}"
                     }
                     throw GA4ClientException(
                         "Request failed with status ${response.status.value}: $errorBody"
@@ -347,33 +374,29 @@ class GA4Client(
                 }
             } catch (e: Exception) {
                 lastException = e
-                
+
                 if (retryCount < maxRetries) {
-                    val delay = calculateRetryDelay(retryCount)
-                    logger.debug(delay, retryCount + 1, maxRetries) { 
-                        "Retrying after {delay}ms (attempt {attempt}/{maxRetries})" 
+                    val delayMs = calculateRetryDelay(retryCount)
+                    logger.debug(delayMs, retryCount + 1, maxRetries) {
+                        "Retrying after {delay}ms (attempt {attempt}/{maxRetries})"
                     }
-                    delay(delay)
+                    delay(delayMs)
                     retryCount++
                 } else {
                     break
                 }
             }
         }
-        
+
         throw lastException ?: GA4ClientException("Request failed after $retryCount retries")
     }
-    
-    /**
-     * Calculates exponential backoff delay for retries
-     */
+
     private fun calculateRetryDelay(retryCount: Int): Long {
         val baseDelay = config.retryDelayMs
         val exponentialDelay = baseDelay * (2.0.pow(retryCount)).toLong()
-        val maxDelay = 30_000L // 30 seconds max
+        val maxDelay = 30_000L
         return exponentialDelay.coerceAtMost(maxDelay)
     }
-    
 }
 
 /**

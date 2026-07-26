@@ -5,6 +5,7 @@ import duks.ga4.privacy.PiiScrubberConfig
 import duks.ga4.util.ClientIdStore
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * How the client handles Measurement Protocol validation issues.
@@ -120,7 +121,13 @@ data class GA4Config(
     /**
      * Prefer page_view over screen_view for web streams (logs/warns on screen_view).
      */
-    val preferPageViewForWeb: Boolean = true
+    val preferPageViewForWeb: Boolean = true,
+
+    /**
+     * How often the client event queue auto-flushes. Middleware should use this
+     * (via the client) rather than owning a separate batcher.
+     */
+    val flushInterval: Duration = 10.seconds
 ) {
     init {
         require(measurementId.isNotBlank()) { "Measurement ID cannot be blank" }
@@ -151,18 +158,22 @@ data class GA4Config(
 }
 
 /**
- * Privacy configuration for GA4
+ * Privacy configuration for GA4.
+ *
+ * Defaults are **opt-in** (consent not enforced, PII not scrubbed) so the client
+ * sends events without privacy wiring. Enable via [duks.ga4.middleware.GA4MiddlewareBuilder.enablePrivacy]
+ * or by setting these flags explicitly.
  */
 data class PrivacyConfig(
     /**
-     * Whether to enforce consent before processing events
+     * Whether to enforce consent before processing events (requires a ConsentManager on the client).
      */
-    val enforceConsent: Boolean = true,
+    val enforceConsent: Boolean = false,
     
     /**
-     * Whether to scrub PII from events
+     * Whether to scrub PII from events on the send path.
      */
-    val scrubPii: Boolean = true,
+    val scrubPii: Boolean = false,
     
     /**
      * PII scrubber configuration

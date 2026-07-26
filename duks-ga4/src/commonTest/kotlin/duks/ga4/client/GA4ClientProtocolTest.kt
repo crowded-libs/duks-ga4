@@ -130,6 +130,38 @@ class GA4ClientProtocolTest {
     }
 
     @Test
+    fun `scrubs PII when privacyConfig scrubPii is enabled`() = runTest(timeout = 5.seconds) {
+        var body: String? = null
+        val mockEngine = MockEngine { request ->
+            body = request.body.toByteArray().decodeToString()
+            respond(content = "", status = HttpStatusCode.NoContent)
+        }
+        val config = TestUtils.createTestConfig().copy(
+            privacyConfig = duks.ga4.config.PrivacyConfig(scrubPii = true),
+            attachSessionParams = false,
+            validationMode = ValidationMode.OFF
+        )
+        val client = GA4Client(config, mockEngine, backgroundScope)
+        client.sendEvent(
+            GA4Event(
+                name = "contact",
+                params = mapOf(
+                    "email" to EventParamValue.StringValue("user@example.com"),
+                    "note" to EventParamValue.StringValue("hello")
+                )
+            ),
+            clientId = "1.2",
+            immediate = true
+        ).getOrThrow()
+
+        val params = json.parseToJsonElement(body!!).jsonObject["events"]!!
+            .jsonArray.single().jsonObject["params"]!!.jsonObject
+        assertEquals("[REDACTED]", params["email"]?.jsonPrimitive?.content)
+        assertEquals("hello", params["note"]?.jsonPrimitive?.content)
+        client.close()
+    }
+
+    @Test
     fun `reserved events are dropped in LOG mode`() = runTest(timeout = 5.seconds) {
         var requestCount = 0
         val mockEngine = MockEngine {
