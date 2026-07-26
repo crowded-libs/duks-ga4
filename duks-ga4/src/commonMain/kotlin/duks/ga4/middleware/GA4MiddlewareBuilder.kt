@@ -4,11 +4,13 @@ import duks.*
 import duks.ga4.client.IGA4Client
 import duks.ga4.config.GA4Config
 import duks.ga4.config.PrivacyConfig
+import duks.ga4.config.ValidationMode
 import duks.ga4.model.UserPropertyValue
 import duks.ga4.privacy.ConsentManager
 import duks.ga4.privacy.ConsentStorage
 import duks.ga4.privacy.DefaultConsentManager
 import duks.ga4.privacy.InMemoryConsentStorage
+import duks.ga4.util.ClientIdStore
 import duks.routing.RouterMiddleware
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -259,6 +261,10 @@ class GA4ConfigBuilder {
     private var defaultClientId: String? = null
     private var autoGenerateClientId: Boolean = true
     private var privacyConfig: PrivacyConfig? = null
+    private var validationMode: ValidationMode = ValidationMode.LOG
+    private var attachSessionParams: Boolean = true
+    private var clientIdStore: ClientIdStore? = null
+    private var preferPageViewForWeb: Boolean = true
     
     fun measurementId(id: String) = apply { measurementId = id }
     fun apiSecret(secret: String) = apply { apiSecret = secret }
@@ -272,6 +278,10 @@ class GA4ConfigBuilder {
     fun defaultClientId(clientId: String) = apply { defaultClientId = clientId }
     fun autoGenerateClientId(enabled: Boolean = true) = apply { autoGenerateClientId = enabled }
     fun privacyConfig(config: PrivacyConfig) = apply { privacyConfig = config }
+    fun validationMode(mode: ValidationMode) = apply { validationMode = mode }
+    fun attachSessionParams(enabled: Boolean = true) = apply { attachSessionParams = enabled }
+    fun clientIdStore(store: ClientIdStore) = apply { clientIdStore = store }
+    fun preferPageViewForWeb(enabled: Boolean = true) = apply { preferPageViewForWeb = enabled }
     
     fun build(): GA4Config {
         return GA4Config(
@@ -286,7 +296,11 @@ class GA4ConfigBuilder {
             customEndpoint = customEndpoint,
             defaultClientId = defaultClientId,
             autoGenerateClientId = autoGenerateClientId,
-            privacyConfig = privacyConfig ?: PrivacyConfig()
+            clientIdStore = clientIdStore,
+            privacyConfig = privacyConfig ?: PrivacyConfig(),
+            validationMode = validationMode,
+            attachSessionParams = attachSessionParams,
+            preferPageViewForWeb = preferPageViewForWeb
         )
     }
 }

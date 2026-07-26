@@ -14,7 +14,8 @@ A Kotlin Multiplatform library for Google Analytics 4 (GA4) integration with the
 - **Routing Analytics**: Automatic screen view and navigation tracking with duks-routing
 - **Type-Safe Events**: Strongly typed event parameters and validation
 - **Debug Mode**: Built-in validation and debugging support
-- **Offline Support**: Event queuing and retry logic for reliability
+- **In-memory queuing**: Event batching with retry (process-local; not durable across restarts unless you supply storage)
+- **Session params**: Automatic `session_id` and `engagement_time_msec` for Realtime / engaged sessions
 
 ## Installation
 
@@ -129,8 +130,11 @@ GA4Config(
     
     // Optional
     defaultClientId = "default-client", // Default client ID if none provided
-    debugMode = false,                  // Enable debug validation
-    autoGenerateClientId = true,        // Auto-generate client IDs
+    debugMode = false,                  // Enable debug validation endpoint
+    autoGenerateClientId = true,        // Stable in-process auto client IDs
+    attachSessionParams = true,         // Attach session_id + engagement_time_msec
+    validationMode = ValidationMode.LOG,// OFF | LOG | STRICT
+    preferPageViewForWeb = true,        // Warn on screen_view for web streams
     customEndpoint = null,              // Custom endpoint URL
     requestTimeoutMs = 30_000L,         // Request timeout (30 seconds)
     maxEventsPerBatch = 25,             // Max events per batch (GA4 limit)
@@ -138,7 +142,7 @@ GA4Config(
     maxRetries = 3,                     // Maximum retry attempts
     retryDelayMs = 1_000L,              // Initial retry delay
     
-    // Privacy configuration
+    // Privacy configuration (enforced when you enable privacy on middleware)
     privacyConfig = PrivacyConfig(
         enforceConsent = true,          // Enforce consent before tracking
         scrubPii = true,                // Automatically scrub PII
@@ -207,19 +211,17 @@ suspend fun trackPurchase(order: Order) {
 ### Custom Event Tracking
 
 ```kotlin
-// Track user engagement
+// Track engagement on a real event (do not send reserved "user_engagement")
 suspend fun trackEngagement(action: String, category: String, value: Long? = null) {
     val params = mutableMapOf<String, EventParamValue>(
         "action" to EventParamValue.StringValue(action),
-        "category" to EventParamValue.StringValue(category)
+        "category" to EventParamValue.StringValue(category),
+        // session_id / engagement_time_msec are attached by the client when enabled
+        "engagement_time_msec" to EventParamValue.NumberValue((value ?: 100L).toDouble())
     )
     
-    value?.let {
-        params["value"] = EventParamValue.NumberValue(it.toDouble())
-    }
-    
     ga4Client.sendEvent(
-        GA4Event(name = "user_engagement", params = params)
+        GA4Event(name = "select_content", params = params)
     )
 }
 
@@ -636,6 +638,24 @@ class GA4Middleware<TState : StateModel>(
     userIdProvider: suspend (TState) -> String? = { null }
 ) : Middleware<TState>, StoreLifecycleAware<TState>
 ```
+
+## Production checklist
+
+1. **Client ID**: Provide a stable `clientId` (or `defaultClientId` / `clientIdProvider`). Auto-generated IDs are stable for the process; pass a `ClientIdStore` if you need them across restarts (e.g. backed by kotlin-lmdb in your app).
+
+2. **Session params**: Leave `attachSessionParams = true` (default) so every event gets `session_id` and `engagement_time_msec` — required for Realtime and engaged-session metrics.
+
+3. **Debug validation**: Use `debugMode = true` and GA4 DebugView while integrating; the client also runs local validation (`validationMode = LOG` by default).
+
+4. **Event names**: Prefer recommended events (`page_view`, `purchase`, …). Do **not** send reserved names such as `user_engagement` or `session_start` via Measurement Protocol.
+
+5. **Web stream**: This library targets web/gtag-style streams (`measurement_id` + `client_id`). Prefer `page_view` over `screen_view` on web.
+
+6. **Batching**: Prefer batching; send purchases and other critical events with `immediate = true`.
+
+7. **Privacy (opt-in)**: Call `enablePrivacy { ... }` when you need consent gating; PII scrubbing config is available when you wire privacy features.
+
+8. **Offline**: The default queue is **in-memory** with retries. Process death drops queued events unless you add durable storage yourself.
 
 ## Best Practices
 

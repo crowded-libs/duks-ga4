@@ -24,32 +24,50 @@ import kotlin.math.pow
 class GA4Client(
     private val config: GA4Config,
     engine: HttpClientEngine? = null,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val sessionManager: SessionManager = DefaultSessionManager(
+        sessionTimeout = config.sessionTimeout
+    )
 ) : IGA4Client {
     
     private val logger = Logger.default()
-    
-    private val httpClient = HttpClient(engine ?: HttpClient().engine) {
-            install(ContentNegotiation) {
-                json(Json {
-                    ignoreUnknownKeys = true
-                    encodeDefaults = false
-                    isLenient = true
-                })
-            }
-            
-            install(HttpTimeout) {
-                requestTimeoutMillis = config.requestTimeoutMs
-                connectTimeoutMillis = config.requestTimeoutMs / 2
-                socketTimeoutMillis = config.requestTimeoutMs
-            }
-            
-            defaultRequest {
-                contentType(ContentType.Application.Json)
-            }
+
+    private val json = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = false
+        isLenient = true
+        explicitNulls = false
     }
     
-    private val clientIdGenerator = ClientIdGenerator()
+    private val httpClient = if (engine != null) {
+        HttpClient(engine) {
+            installDefaults()
+        }
+    } else {
+        HttpClient {
+            installDefaults()
+        }
+    }
+
+    private fun HttpClientConfig<*>.installDefaults() {
+        install(ContentNegotiation) {
+            json(json)
+        }
+        install(HttpTimeout) {
+            requestTimeoutMillis = config.requestTimeoutMs
+            connectTimeoutMillis = config.requestTimeoutMs / 2
+            socketTimeoutMillis = config.requestTimeoutMs
+        }
+        defaultRequest {
+            contentType(ContentType.Application.Json)
+        }
+    }
+    
+    private val clientIdGenerator = ClientIdGenerator(config.clientIdStore)
+    private val eventValidator = EventValidator(
+        mode = config.validationMode,
+        preferPageViewForWeb = config.preferPageViewForWeb
+    )
     
     private val batcher = EventBatcher(
         config = config,
@@ -73,23 +91,25 @@ class GA4Client(
         immediate: Boolean,
         userProperties: Map<String, duks.ga4.model.UserPropertyValue>?
     ): Result<Unit> = runCatching {
-        val finalClientId = clientId 
-            ?: config.defaultClientId 
-            ?: if (config.autoGenerateClientId) clientIdGenerator.generate() else throw IllegalArgumentException("Client ID is required")
+        val finalClientId = resolveClientId(clientId)
+        val prepared = prepareEvents(listOf(event))
+        if (prepared.isEmpty()) {
+            logger.warn(event.name) { "Event dropped after validation: {eventName}" }
+            return@runCatching
+        }
+        val preparedEvent = prepared.single()
         
-        logger.debug(event.name, finalClientId, immediate) { 
+        logger.debug(preparedEvent.name, finalClientId, immediate) { 
             "Sending event: {eventName}, clientId: {clientId}, immediate: {immediate}" 
         }
         
         if (immediate) {
-            // Send immediately without batching
-            val request = createRequest(listOf(event), finalClientId, userId, userProperties)
+            val request = createRequest(listOf(preparedEvent), finalClientId, userId, userProperties)
             sendRequest(request)
         } else {
-            // Add to batch
-            val added = batcher.addEvent(event, finalClientId, userId, userProperties)
+            val added = batcher.addEvent(preparedEvent, finalClientId, userId, userProperties)
             if (!added) {
-                logger.warn(event.name) { 
+                logger.warn(preparedEvent.name) { 
                     "Event queue is full, cannot add event: {eventName}" 
                 }
                 throw IllegalStateException("Event queue is full")
@@ -109,28 +129,29 @@ class GA4Client(
     ): Result<Unit> = runCatching {
         require(events.isNotEmpty()) { "Events list cannot be empty" }
         
-        val finalClientId = clientId 
-            ?: config.defaultClientId 
-            ?: if (config.autoGenerateClientId) clientIdGenerator.generate() else throw IllegalArgumentException("Client ID is required")
+        val finalClientId = resolveClientId(clientId)
+        val prepared = prepareEvents(events)
+        if (prepared.isEmpty()) {
+            logger.warn(events.size) { "All {count} events dropped after validation" }
+            return@runCatching
+        }
         
-        logger.debug(events.size, finalClientId, immediate) { 
+        logger.debug(prepared.size, finalClientId, immediate) { 
             "Sending {eventCount} events, clientId: {clientId}, immediate: {immediate}" 
         }
         
         if (immediate) {
-            // Send immediately in batches
-            events.chunked(config.maxEventsPerBatch).forEach { batch ->
+            prepared.chunked(config.maxEventsPerBatch).forEach { batch ->
                 val request = createRequest(batch, finalClientId, userId, userProperties)
                 sendRequest(request)
             }
         } else {
-            // Add to batch
-            val added = batcher.addEvents(events, finalClientId, userId)
-            if (added < events.size) {
-                logger.warn(added, events.size) { 
+            val added = batcher.addEvents(prepared, finalClientId, userId)
+            if (added < prepared.size) {
+                logger.warn(added, prepared.size) { 
                     "Could only add {added} of {total} events to queue" 
                 }
-                throw IllegalStateException("Could only add $added of ${events.size} events to queue")
+                throw IllegalStateException("Could only add $added of ${prepared.size} events to queue")
             }
         }
     }
@@ -156,7 +177,47 @@ class GA4Client(
         flush()
         batcher.stop()
         httpClient.close()
-        // Note: We don't cancel the scope as it may be shared with other components
+    }
+
+    private suspend fun resolveClientId(clientId: String?): String {
+        return clientId
+            ?: config.defaultClientId
+            ?: if (config.autoGenerateClientId) {
+                clientIdGenerator.getOrCreate()
+            } else {
+                throw IllegalArgumentException("Client ID is required")
+            }
+    }
+
+    /**
+     * Validates events and attaches session/engagement params when configured.
+     */
+    private fun prepareEvents(events: List<GA4Event>): List<GA4Event> {
+        val withSession = if (config.attachSessionParams) {
+            val sid = sessionManager.touch()
+            events.map { attachSessionParams(it, sid) }
+        } else {
+            events
+        }
+        return eventValidator.validate(withSession)
+    }
+
+    private fun attachSessionParams(event: GA4Event, sessionId: String): GA4Event {
+        val params = event.params.toMutableMap()
+        var changed = false
+
+        if (!params.containsKey("session_id")) {
+            // GA4 accepts string or number; use numeric string of epoch seconds
+            params["session_id"] = EventParamValue.StringValue(sessionId)
+            changed = true
+        }
+        if (!params.containsKey("engagement_time_msec") && config.defaultEngagementTimeMsec > 0) {
+            params["engagement_time_msec"] =
+                EventParamValue.NumberValue(config.defaultEngagementTimeMsec.toDouble())
+            changed = true
+        }
+
+        return if (changed) event.copy(params = params) else event
     }
     
     /**
@@ -164,7 +225,13 @@ class GA4Client(
      */
     private suspend fun sendBatch(batch: List<BatchedEvent>) {
         // Group events by client ID
-        val groupedEvents = batch.groupBy { it.clientId ?: config.defaultClientId ?: clientIdGenerator.generate() }
+        val groupedEvents = mutableMapOf<String, MutableList<BatchedEvent>>()
+        for (event in batch) {
+            val key = event.clientId
+                ?: config.defaultClientId
+                ?: clientIdGenerator.getOrCreate()
+            groupedEvents.getOrPut(key) { mutableListOf() }.add(event)
+        }
         
         for ((clientId, events) in groupedEvents) {
             val ga4Events = events.map { it.event }
@@ -248,7 +315,7 @@ class GA4Client(
                             if (ga4Response.validationMessages.isNotEmpty()) {
                                 ga4Response.validationMessages.forEach { message ->
                                     when (message.validationCode?.uppercase()) {
-                                        "ERROR" -> logger.error(
+                                        "ERROR", "VALUE_INVALID", "NAME_INVALID" -> logger.error(
                                             message.fieldPath ?: "Unknown field", 
                                             message.description ?: "No description"
                                         ) { "GA4 Validation - {fieldPath}: {description}" }

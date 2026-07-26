@@ -15,16 +15,17 @@ data class GA4Event(
     val name: String,
     
     /**
-     * Event parameters as key-value pairs
+     * Event parameters as key-value pairs.
+     * Serialized as plain GA4 Measurement Protocol values (not sealed-class envelopes).
      */
     @SerialName("params")
+    @Serializable(with = EventParamsSerializer::class)
     val params: Map<String, EventParamValue> = emptyMap()
 ) {
     companion object {
-        // Standard GA4 event names
+        // Standard GA4 recommended event names (safe to send via Measurement Protocol)
         const val PAGE_VIEW = "page_view"
         const val SCREEN_VIEW = "screen_view"
-        const val USER_ENGAGEMENT = "user_engagement"
         const val SCROLL = "scroll"
         const val CLICK = "click"
         const val SEARCH = "search"
@@ -42,28 +43,36 @@ data class GA4Event(
         const val SELECT_CONTENT = "select_content"
         const val VIEW_PROMOTION = "view_promotion"
         const val SELECT_PROMOTION = "select_promotion"
+
+        /**
+         * Reserved by Google Analytics automatic collection — do not send via Measurement Protocol.
+         * Prefer attaching [engagement_time_msec] to real events instead.
+         */
+        @Deprecated(
+            message = "user_engagement is a reserved GA4 event name and cannot be sent via Measurement Protocol. " +
+                "Attach engagement_time_msec to your events instead.",
+            level = DeprecationLevel.WARNING
+        )
+        const val USER_ENGAGEMENT = "user_engagement"
     }
 }
 
 /**
- * Wrapper for event parameter values to handle different types
+ * Wrapper for event parameter values to handle different types.
+ * Wire format is plain JSON (string / number / boolean / items array).
  */
-@Serializable
+@Serializable(with = EventParamValueSerializer::class)
 sealed class EventParamValue {
     @Serializable
-    @SerialName("string")
     data class StringValue(val value: String) : EventParamValue()
     
     @Serializable
-    @SerialName("number")
     data class NumberValue(val value: Double) : EventParamValue()
     
     @Serializable
-    @SerialName("boolean")
     data class BooleanValue(val value: Boolean) : EventParamValue()
     
     @Serializable
-    @SerialName("items")
     data class ItemsValue(val value: List<Item>) : EventParamValue()
 }
 

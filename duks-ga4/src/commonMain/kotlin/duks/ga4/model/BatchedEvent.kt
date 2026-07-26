@@ -31,6 +31,7 @@ data class BatchedEvent(
     /**
      * Optional user properties captured when the event was queued
      */
+    @Serializable(with = UserPropertiesSerializer::class)
     val userProperties: Map<String, UserPropertyValue>? = null,
     
     /**

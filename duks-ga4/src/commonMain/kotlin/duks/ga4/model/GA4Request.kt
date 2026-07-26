@@ -27,15 +27,18 @@ data class GA4Request(
     val timestampMicros: Long? = null,
     
     /**
-     * User properties to be associated with the user
+     * User properties to be associated with the user.
+     * Serialized as `{ "prop_name": { "value": ... } }`.
      */
     @SerialName("user_properties")
+    @Serializable(with = UserPropertiesSerializer::class)
     val userProperties: Map<String, UserPropertyValue>? = null,
     
     /**
-     * Consent state for the user
+     * Consent state for the request (MP wire: ad_user_data + ad_personalization only).
      */
     @SerialName("consent")
+    @Serializable(with = MeasurementProtocolConsentSerializer::class)
     val consent: ConsentState? = null,
     
     /**
@@ -45,26 +48,20 @@ data class GA4Request(
     val events: List<GA4Event>,
     
     /**
-     * Whether events should be processed for debugging
+     * Whether events should be processed for non-personalized ads (deprecated by GA4;
+     * prefer consent.ad_personalization).
      */
     @SerialName("non_personalized_ads")
     val nonPersonalizedAds: Boolean? = null
 )
 
 /**
- * Wrapper for user property values
+ * Wrapper for user property values.
+ * Wire format is `{ "value": <string|number> }`.
  */
-@Serializable
+@Serializable(with = UserPropertyValueSerializer::class)
 sealed class UserPropertyValue {
-    @Serializable
-    @SerialName("string")
-    data class StringValue(@SerialName("value") val value: String) : UserPropertyValue()
-    
-    @Serializable
-    @SerialName("number")
-    data class NumberValue(@SerialName("value") val value: Double) : UserPropertyValue()
-    
-    @Serializable
-    @SerialName("boolean")
-    data class BooleanValue(@SerialName("value") val value: Boolean) : UserPropertyValue()
+    data class StringValue(val value: String) : UserPropertyValue()
+    data class NumberValue(val value: Double) : UserPropertyValue()
+    data class BooleanValue(val value: Boolean) : UserPropertyValue()
 }

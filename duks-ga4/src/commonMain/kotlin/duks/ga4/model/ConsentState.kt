@@ -1,43 +1,36 @@
 package duks.ga4.model
 
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * Represents the consent state for Google Analytics tracking
+ * Represents the consent state for Google Analytics tracking.
+ *
+ * Used both for app-side Consent Mode gating (all fields) and as input to the
+ * Measurement Protocol payload. On the wire, only [adUserData] and
+ * [adPersonalization] are sent (see [MeasurementProtocolConsentSerializer]).
+ *
+ * Default serialization uses the full storage format (all Consent Mode fields).
+ * [GA4Request] overrides this with the MP-only serializer.
  */
-@Serializable
+@Serializable(with = ConsentStateStorageSerializer::class)
 data class ConsentState(
-    @SerialName("ad_storage")
     val adStorage: ConsentValue? = null,
-    
-    @SerialName("analytics_storage")
     val analyticsStorage: ConsentValue? = null,
-    
-    @SerialName("ad_personalization")
     val adPersonalization: ConsentValue? = null,
-    
-    @SerialName("ad_user_data")
     val adUserData: ConsentValue? = null,
-    
-    @SerialName("functionality_storage")
     val functionalityStorage: ConsentValue? = null,
-    
-    @SerialName("personalization_storage")
     val personalizationStorage: ConsentValue? = null,
-    
-    @SerialName("security_storage")
     val securityStorage: ConsentValue? = null
 )
 
 /**
- * Consent values for Google Analytics
+ * Consent values for Google Analytics.
+ *
+ * Measurement Protocol expects uppercase `GRANTED` / `DENIED` on the wire.
+ * App-side comparisons use this enum regardless of storage casing.
  */
 @Serializable
 enum class ConsentValue {
-    @SerialName("granted")
     GRANTED,
-    
-    @SerialName("denied")
     DENIED
 }

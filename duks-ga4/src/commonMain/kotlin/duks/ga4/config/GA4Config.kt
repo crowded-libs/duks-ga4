@@ -2,6 +2,23 @@ package duks.ga4.config
 
 import duks.ga4.model.ConsentState
 import duks.ga4.privacy.PiiScrubberConfig
+import duks.ga4.util.ClientIdStore
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
+
+/**
+ * How the client handles Measurement Protocol validation issues.
+ */
+enum class ValidationMode {
+    /** Skip client-side validation. */
+    OFF,
+
+    /** Log issues; drop reserved events; sanitize overlong values. Default. */
+    LOG,
+
+    /** Fail the send with [duks.ga4.client.GA4ValidationException]. */
+    STRICT
+}
 
 /**
  * Configuration for Google Analytics 4 client
@@ -28,14 +45,21 @@ data class GA4Config(
     val debugMode: Boolean = false,
     
     /**
-     * Default consent state to apply to all requests
+     * Default consent state to apply to all requests (MP wire: ad_user_data + ad_personalization)
      */
     val defaultConsent: ConsentState? = null,
     
     /**
-     * Whether to automatically generate client IDs if not provided
+     * Whether to automatically generate client IDs if not provided.
+     * Generated IDs are stable for the process lifetime (and [clientIdStore] if set).
      */
     val autoGenerateClientId: Boolean = true,
+
+    /**
+     * Optional store for persisting auto-generated client IDs across restarts.
+     * Not required; when null, IDs are stable only within the process.
+     */
+    val clientIdStore: ClientIdStore? = null,
     
     /**
      * Custom endpoint URL (optional, uses default GA4 endpoint if not specified)
@@ -70,7 +94,33 @@ data class GA4Config(
     /**
      * Privacy configuration
      */
-    val privacyConfig: PrivacyConfig = PrivacyConfig()
+    val privacyConfig: PrivacyConfig = PrivacyConfig(),
+
+    /**
+     * Client-side event validation mode
+     */
+    val validationMode: ValidationMode = ValidationMode.LOG,
+
+    /**
+     * When true (default), attach session_id and engagement_time_msec to events
+     * that do not already set them (required for Realtime / engaged sessions).
+     */
+    val attachSessionParams: Boolean = true,
+
+    /**
+     * Session idle timeout used by the default session manager.
+     */
+    val sessionTimeout: Duration = 30.minutes,
+
+    /**
+     * Default engagement_time_msec when not provided on the event (minimum useful value is 1).
+     */
+    val defaultEngagementTimeMsec: Long = 100L,
+
+    /**
+     * Prefer page_view over screen_view for web streams (logs/warns on screen_view).
+     */
+    val preferPageViewForWeb: Boolean = true
 ) {
     init {
         require(measurementId.isNotBlank()) { "Measurement ID cannot be blank" }
@@ -79,6 +129,7 @@ data class GA4Config(
         require(requestTimeoutMs > 0) { "Request timeout must be positive" }
         require(maxRetries >= 0) { "Max retries cannot be negative" }
         require(retryDelayMs >= 0) { "Retry delay cannot be negative" }
+        require(defaultEngagementTimeMsec >= 0) { "Default engagement time cannot be negative" }
     }
     
     companion object {
@@ -86,6 +137,11 @@ data class GA4Config(
          * Default GA4 Measurement Protocol endpoint
          */
         const val DEFAULT_ENDPOINT = "https://www.google-analytics.com/mp/collect"
+
+        /**
+         * EU regional collect endpoint
+         */
+        const val EU_ENDPOINT = "https://region1.google-analytics.com/mp/collect"
         
         /**
          * Debug validation endpoint
