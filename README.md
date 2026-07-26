@@ -156,9 +156,52 @@ GA4Config(
 
 ### E-commerce Tracking
 
+Prefer the typed recommended-event helpers:
+
+```kotlin
+import duks.ga4.model.*
+
+suspend fun trackProductView(product: Product) {
+    val item = Item(
+        itemId = product.id,
+        itemName = product.name,
+        itemCategory = product.category,
+        price = product.price,
+        quantity = 1
+    )
+    ga4Client.sendEvent(
+        viewItemEvent(
+            items = listOf(item),
+            currency = "USD",
+            value = product.price
+        ),
+        clientId = "user123",
+        immediate = false
+    )
+}
+
+suspend fun trackPurchase(order: Order) {
+    val items = order.items.map { /* map to Item */ }
+    ga4Client.sendEvent(
+        purchaseEvent(
+            transactionId = order.id,
+            items = items,
+            currency = "USD",
+            value = items.totalValue(),
+            tax = order.tax,
+            shipping = order.shipping
+        ),
+        clientId = "user123",
+        immediate = true
+    )
+}
+```
+
+Or build events manually:
+
 ```kotlin
 // Track product views
-suspend fun trackProductView(product: Product) {
+suspend fun trackProductViewManual(product: Product) {
     ga4Client.sendEvent(
         GA4Event(
             name = "view_item",
@@ -181,31 +224,39 @@ suspend fun trackProductView(product: Product) {
     )
 }
 
-// Track purchases
-suspend fun trackPurchase(order: Order) {
-    ga4Client.sendEvent(
-        GA4Event(
-            name = "purchase",
-            params = mapOf(
-                "transaction_id" to EventParamValue.StringValue(order.id),
-                "currency" to EventParamValue.StringValue("USD"),
-                "value" to EventParamValue.NumberValue(order.total),
-                "tax" to EventParamValue.NumberValue(order.tax),
-                "shipping" to EventParamValue.NumberValue(order.shipping),
-                "items" to EventParamValue.ItemsValue(
-                    order.items.map { item ->
-                        Item(
-                            itemId = item.productId,
-                            itemName = item.name,
-                            price = item.price,
-                            quantity = item.quantity
-                        )
-                    }
-                )
-            )
+### Device / geo context
+
+Supply structured `device` / `user_location` (or `ip_override`) on every request:
+
+```kotlin
+val client = GA4Client(
+    config = config,
+    scope = scope,
+    contextProvider = ContextProvider {
+        RequestContext(
+            device = DeviceInfo(
+                category = "desktop",
+                language = "en",
+                browser = "Chrome",
+                screenResolution = "1920x1080"
+            ),
+            userLocation = UserLocation(countryId = "US", regionId = "US-CA")
         )
-    )
-}
+    }
+)
+```
+
+### Durable queue (optional)
+
+The default queue is in-memory. To survive process death, implement `EventQueueStore`
+(prefer **kotlin-lmdb** in your app) and pass it to the client:
+
+```kotlin
+val client = GA4Client(
+    config = config,
+    scope = scope,
+    eventQueueStore = myLmdbEventQueueStore
+)
 ```
 
 ### Custom Event Tracking

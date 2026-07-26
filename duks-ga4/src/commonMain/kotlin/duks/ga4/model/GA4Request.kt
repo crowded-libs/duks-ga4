@@ -9,7 +9,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class GA4Request(
     /**
-     * The client ID for the user (required)
+     * The client ID for the user (required for web streams)
      */
     @SerialName("client_id")
     val clientId: String,
@@ -40,6 +40,30 @@ data class GA4Request(
     @SerialName("consent")
     @Serializable(with = MeasurementProtocolConsentSerializer::class)
     val consent: ConsentState? = null,
+
+    /**
+     * Structured device information (optional).
+     */
+    @SerialName("device")
+    val device: DeviceInfo? = null,
+
+    /**
+     * Structured geographic information (optional). Prefers over [ipOverride].
+     */
+    @SerialName("user_location")
+    val userLocation: UserLocation? = null,
+
+    /**
+     * IP used by GA to derive geo when [userLocation] is absent (optional).
+     */
+    @SerialName("ip_override")
+    val ipOverride: String? = null,
+
+    /**
+     * User-agent string when [device] is not provided (optional).
+     */
+    @SerialName("user_agent")
+    val userAgent: String? = null,
     
     /**
      * List of events to send

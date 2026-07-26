@@ -5,8 +5,12 @@ import duks.ga4.config.GA4Config
 import duks.ga4.config.ValidationMode
 import duks.ga4.model.ConsentState
 import duks.ga4.model.ConsentValue
+import duks.ga4.model.ContextProvider
+import duks.ga4.model.DeviceInfo
 import duks.ga4.model.EventParamValue
 import duks.ga4.model.GA4Event
+import duks.ga4.model.RequestContext
+import duks.ga4.model.UserLocation
 import duks.ga4.model.UserPropertyValue
 import io.ktor.client.engine.mock.*
 import io.ktor.http.*
@@ -126,6 +130,32 @@ class GA4ClientProtocolTest {
         val props = root["user_properties"]!!.jsonObject
         assertEquals("gold", props["tier"]!!.jsonObject["value"]?.jsonPrimitive?.content)
 
+        client.close()
+    }
+
+    @Test
+    fun `attaches device and user_location from ContextProvider`() = runTest(timeout = 5.seconds) {
+        var body: String? = null
+        val mockEngine = MockEngine { request ->
+            body = request.body.toByteArray().decodeToString()
+            respond(content = "", status = HttpStatusCode.NoContent)
+        }
+        val config = TestUtils.createTestConfig().copy(attachSessionParams = false)
+        val client = GA4Client(
+            config = config,
+            engine = mockEngine,
+            scope = backgroundScope,
+            contextProvider = ContextProvider {
+                RequestContext(
+                    device = DeviceInfo(category = "desktop", language = "en", browser = "Chrome"),
+                    userLocation = UserLocation(countryId = "US", regionId = "US-CA")
+                )
+            }
+        )
+        client.sendEvent(GA4Event("page_view"), clientId = "1.2", immediate = true).getOrThrow()
+        val root = json.parseToJsonElement(body!!).jsonObject
+        assertEquals("desktop", root["device"]!!.jsonObject["category"]!!.jsonPrimitive.content)
+        assertEquals("US", root["user_location"]!!.jsonObject["country_id"]!!.jsonPrimitive.content)
         client.close()
     }
 

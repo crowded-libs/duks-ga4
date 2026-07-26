@@ -48,7 +48,12 @@ class EventBatcher(
     private val onBatchReady: suspend (List<BatchedEvent>) -> BatchDeliveryResult,
     private val flushInterval: Duration = 10.seconds,
     private val maxQueueSize: Int = 1000,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    /**
+     * Optional durable snapshot store. When set, the queue is restored on [restoreFromStore]
+     * and rewritten after enqueue / flush / requeue / clear.
+     */
+    private val eventQueueStore: EventQueueStore? = null
 ) {
     private val logger = Logger.default()
     private val eventQueue = mutableListOf<BatchedEvent>()
@@ -78,59 +83,38 @@ class EventBatcher(
      * Adds an event to the queue.
      * @return false if the queue is full
      */
+    /**
+     * Loads pending events from [eventQueueStore] into the in-memory queue.
+     * Safe to call once after construction (e.g. from [GA4Client] init).
+     */
+    suspend fun restoreFromStore() {
+        val store = eventQueueStore ?: return
+        val pending = store.loadPending()
+        if (pending.isEmpty()) return
+        queueMutex.withLock {
+            eventQueue.clear()
+            eventQueue.addAll(pending)
+            _queueSize.value = eventQueue.size
+        }
+        logger.info(pending.size) {
+            "Restored {count} events from durable queue store"
+        }
+        if (eventQueue.size >= config.maxEventsPerBatch) {
+            scope.launch { flush() }
+        }
+    }
+
     suspend fun addEvent(
         event: GA4Event,
         clientId: String? = null,
         userId: String? = null,
         userProperties: Map<String, duks.ga4.model.UserPropertyValue>? = null
-    ): Boolean = queueMutex.withLock {
-        if (eventQueue.size >= maxQueueSize) {
-            _stats.value = _stats.value.copy(dropped = _stats.value.dropped + 1)
-            return@withLock false
-        }
-
-        val batchedEvent = BatchedEvent(
-            event = event,
-            queuedAt = Clock.System.now(),
-            clientId = clientId,
-            userId = userId,
-            userProperties = userProperties
-        )
-
-        eventQueue.add(batchedEvent)
-        _queueSize.value = eventQueue.size
-
-        logger.debug(event.name, eventQueue.size) {
-            "Event {eventName} added to queue, current size: {queueSize}"
-        }
-
-        if (eventQueue.size >= config.maxEventsPerBatch) {
-            logger.debug(eventQueue.size, config.maxEventsPerBatch) {
-                "Queue size {queueSize} reached batch limit {maxBatchSize}, triggering flush"
-            }
-            scope.launch { flush() }
-        }
-
-        true
-    }
-
-    /**
-     * Adds multiple events to the queue.
-     * @return number of events actually enqueued
-     */
-    suspend fun addEvents(
-        events: List<GA4Event>,
-        clientId: String? = null,
-        userId: String? = null,
-        userProperties: Map<String, duks.ga4.model.UserPropertyValue>? = null
-    ): Int = queueMutex.withLock {
-        var addedCount = 0
-
-        for (event in events) {
+    ): Boolean {
+        val shouldFlush: Boolean
+        val added = queueMutex.withLock {
             if (eventQueue.size >= maxQueueSize) {
-                val remaining = events.size - addedCount
-                _stats.value = _stats.value.copy(dropped = _stats.value.dropped + remaining)
-                break
+                _stats.value = _stats.value.copy(dropped = _stats.value.dropped + 1)
+                return@withLock false
             }
 
             eventQueue.add(
@@ -142,20 +126,63 @@ class EventBatcher(
                     userProperties = userProperties
                 )
             )
-            addedCount++
+            _queueSize.value = eventQueue.size
+
+            logger.debug(event.name, eventQueue.size) {
+                "Event {eventName} added to queue, current size: {queueSize}"
+            }
+            true
         }
-
-        _queueSize.value = eventQueue.size
-
-        logger.debug(addedCount, events.size, eventQueue.size) {
-            "Added {addedCount} of {totalEvents} events to queue, current size: {queueSize}"
-        }
-
-        if (eventQueue.size >= config.maxEventsPerBatch) {
+        if (!added) return false
+        persistSnapshot()
+        shouldFlush = queueMutex.withLock { eventQueue.size >= config.maxEventsPerBatch }
+        if (shouldFlush) {
             scope.launch { flush() }
         }
+        return true
+    }
 
-        addedCount
+    /**
+     * Adds multiple events to the queue.
+     * @return number of events actually enqueued
+     */
+    suspend fun addEvents(
+        events: List<GA4Event>,
+        clientId: String? = null,
+        userId: String? = null,
+        userProperties: Map<String, duks.ga4.model.UserPropertyValue>? = null
+    ): Int {
+        val addedCount = queueMutex.withLock {
+            var count = 0
+            for (event in events) {
+                if (eventQueue.size >= maxQueueSize) {
+                    val remaining = events.size - count
+                    _stats.value = _stats.value.copy(dropped = _stats.value.dropped + remaining)
+                    break
+                }
+                eventQueue.add(
+                    BatchedEvent(
+                        event = event,
+                        queuedAt = Clock.System.now(),
+                        clientId = clientId,
+                        userId = userId,
+                        userProperties = userProperties
+                    )
+                )
+                count++
+            }
+            _queueSize.value = eventQueue.size
+            logger.debug(count, events.size, eventQueue.size) {
+                "Added {addedCount} of {totalEvents} events to queue, current size: {queueSize}"
+            }
+            count
+        }
+        if (addedCount > 0) persistSnapshot()
+        val shouldFlush = queueMutex.withLock { eventQueue.size >= config.maxEventsPerBatch }
+        if (shouldFlush) {
+            scope.launch { flush() }
+        }
+        return addedCount
     }
 
     /**
@@ -199,6 +226,7 @@ class EventBatcher(
                         _stats.value = _stats.value.copy(
                             sent = _stats.value.sent + eventsToSend.size
                         )
+                        persistSnapshot()
                         logger.debug(eventsToSend.size) {
                             "Successfully processed batch of {batchSize} events"
                         }
@@ -219,7 +247,10 @@ class EventBatcher(
                                 _stats.value = _stats.value.copy(
                                     dropped = _stats.value.dropped + eventsToSend.size
                                 )
+                                persistSnapshot()
                             }
+                        } else {
+                            persistSnapshot()
                         }
                     }
                 }
@@ -233,7 +264,11 @@ class EventBatcher(
                     val toRequeue = eventsToSend.filter { it.retryCount < config.maxRetries }
                     if (toRequeue.isNotEmpty()) {
                         requeueEvents(toRequeue)
+                    } else {
+                        persistSnapshot()
                     }
+                } else {
+                    persistSnapshot()
                 }
             } finally {
                 _isProcessing.value = false
@@ -263,31 +298,43 @@ class EventBatcher(
     /**
      * Clears all events from the queue without sending.
      */
-    suspend fun clear() = queueMutex.withLock {
-        val sizeBefore = eventQueue.size
-        eventQueue.clear()
-        _queueSize.value = 0
-        _stats.value = _stats.value.copy(dropped = _stats.value.dropped + sizeBefore)
-        logger.info(sizeBefore) {
-            "Cleared {clearedCount} events from queue"
+    suspend fun clear() {
+        queueMutex.withLock {
+            val sizeBefore = eventQueue.size
+            eventQueue.clear()
+            _queueSize.value = 0
+            _stats.value = _stats.value.copy(dropped = _stats.value.dropped + sizeBefore)
+            logger.info(sizeBefore) {
+                "Cleared {clearedCount} events from queue"
+            }
         }
+        eventQueueStore?.clear() ?: persistSnapshot()
     }
 
     /**
      * Returns failed events back to the front of the queue for retry.
      */
-    suspend fun requeueEvents(events: List<BatchedEvent>) = queueMutex.withLock {
-        val eventsToRequeue = events
-            .filter { it.retryCount < config.maxRetries }
-            .map { it.copy(retryCount = it.retryCount + 1) }
+    suspend fun requeueEvents(events: List<BatchedEvent>) {
+        queueMutex.withLock {
+            val eventsToRequeue = events
+                .filter { it.retryCount < config.maxRetries }
+                .map { it.copy(retryCount = it.retryCount + 1) }
 
-        logger.debug(eventsToRequeue.size, events.size, config.maxRetries) {
-            "Requeuing {requeueCount} of {totalEvents} events (max retries: {maxRetries})"
+            logger.debug(eventsToRequeue.size, events.size, config.maxRetries) {
+                "Requeuing {requeueCount} of {totalEvents} events (max retries: {maxRetries})"
+            }
+
+            eventQueue.addAll(0, eventsToRequeue)
+            _queueSize.value = eventQueue.size
+            _stats.value = _stats.value.copy(requeued = _stats.value.requeued + eventsToRequeue.size)
         }
+        persistSnapshot()
+    }
 
-        eventQueue.addAll(0, eventsToRequeue)
-        _queueSize.value = eventQueue.size
-        _stats.value = _stats.value.copy(requeued = _stats.value.requeued + eventsToRequeue.size)
+    private suspend fun persistSnapshot() {
+        val store = eventQueueStore ?: return
+        val snapshot = queueMutex.withLock { eventQueue.toList() }
+        store.persist(snapshot)
     }
 
     private fun startAutoFlush() {

@@ -40,6 +40,14 @@ class GA4Client(
      * is true and this is non-null, events are dropped without analytics consent.
      */
     private val consentManager: ConsentManager? = null,
+    /**
+     * Optional device / geo / IP context for each Measurement Protocol request.
+     */
+    private val contextProvider: ContextProvider? = null,
+    /**
+     * Optional durable queue store (e.g. app-provided kotlin-lmdb adapter).
+     */
+    eventQueueStore: EventQueueStore? = null,
     flushInterval: Duration = config.flushInterval
 ) : IGA4Client {
 
@@ -90,7 +98,8 @@ class GA4Client(
         config = config,
         onBatchReady = { batch -> deliverBatch(batch) },
         flushInterval = flushInterval,
-        scope = scope
+        scope = scope,
+        eventQueueStore = eventQueueStore
     )
 
     /** Snapshot of batcher stats (sent / failed / requeued / dropped). */
@@ -99,6 +108,15 @@ class GA4Client(
     init {
         logger.info(config.measurementId, config.debugMode) {
             "GA4Client initialized with measurementId: {measurementId}, debugMode: {debugMode}"
+        }
+        if (eventQueueStore != null) {
+            scope.launch {
+                try {
+                    batcher.restoreFromStore()
+                } catch (e: Exception) {
+                    logger.error(e) { "Failed to restore durable event queue" }
+                }
+            }
         }
     }
 
@@ -292,18 +310,23 @@ class GA4Client(
         }
     }
 
-    private fun createRequest(
+    private suspend fun createRequest(
         events: List<GA4Event>,
         clientId: String,
         userId: String? = null,
         userProperties: Map<String, duks.ga4.model.UserPropertyValue>? = null
     ): GA4Request {
+        val ctx = contextProvider?.context() ?: RequestContext.EMPTY
         return GA4Request(
             clientId = clientId,
             userId = userId,
             timestampMicros = Clock.System.now().toEpochMilliseconds() * 1000,
             userProperties = userProperties,
             consent = config.defaultConsent,
+            device = ctx.device,
+            userLocation = ctx.userLocation,
+            ipOverride = ctx.ipOverride,
+            userAgent = ctx.userAgent,
             events = events
         )
     }
