@@ -4,6 +4,10 @@ A Kotlin Multiplatform library for Google Analytics 4 (GA4) integration with the
 
 ![duks-ga4 Logo](duks-logo.png)
 
+[![Build](https://github.com/crowded-libs/duks-ga4/actions/workflows/build.yml/badge.svg)](https://github.com/crowded-libs/duks-ga4/actions/workflows/build.yml)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.crowded-libs/duks-ga4.svg?label=Maven%20Central)](https://search.maven.org/search?q=g:%22io.github.crowded-libs%22%20AND%20a:%22duks-ga4%22)
+[![Kotlin](https://img.shields.io/badge/kotlin-2.4.10-blue.svg?logo=kotlin)](http://kotlinlang.org)
+
 ## Features
 
 - **Kotlin Multiplatform**: Android, iOS, JVM, WASM
