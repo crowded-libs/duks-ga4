@@ -304,7 +304,7 @@ class GA4Middleware<TState : StateModel>(
                 name = "screen_time",
                 params = mapOf(
                     "screen_name" to EventParamValue.StringValue(screenName),
-                    "duration_seconds" to EventParamValue.NumberValue(duration.inWholeSeconds.coerceAtLeast(0).toDouble()),
+                    "route_duration_seconds" to EventParamValue.NumberValue(duration.inWholeSeconds.coerceAtLeast(0).toDouble()),
                     "engagement_time_msec" to EventParamValue.NumberValue(durationMillis.toDouble())
                 )
             )
