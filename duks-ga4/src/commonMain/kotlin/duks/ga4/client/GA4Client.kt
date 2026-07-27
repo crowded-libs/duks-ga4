@@ -7,7 +7,6 @@ import duks.ga4.privacy.PiiScrubber
 import duks.ga4.util.ClientIdGenerator
 import duks.logging.*
 import io.ktor.client.*
-import io.ktor.client.call.*
 import io.ktor.client.engine.*
 import io.ktor.client.plugins.*
 import io.ktor.client.plugins.contentnegotiation.*
@@ -249,7 +248,13 @@ class GA4Client(
         } else {
             scrubbed
         }
-        return eventValidator.validate(withSession)
+        val withDebug =
+            if (config.debugMode) {
+                withSession.map { attachDebugMode(it) }
+            } else {
+                withSession
+            }
+        return eventValidator.validate(withDebug)
     }
 
     private fun attachSessionParams(event: GA4Event, sessionId: String): GA4Event {
@@ -267,6 +272,13 @@ class GA4Client(
         }
 
         return if (changed) event.copy(params = params) else event
+    }
+
+    private fun attachDebugMode(event: GA4Event): GA4Event {
+        if (event.params.containsKey("debug_mode")) return event
+        return event.copy(
+            params = event.params + ("debug_mode" to EventParamValue.NumberValue(1.0)),
+        )
     }
 
     /**
@@ -332,11 +344,9 @@ class GA4Client(
     }
 
     private suspend fun sendRequest(request: GA4Request) {
-        val endpoint = when {
-            config.customEndpoint != null -> config.customEndpoint
-            config.debugMode -> GA4Config.DEBUG_ENDPOINT
-            else -> GA4Config.DEFAULT_ENDPOINT
-        }
+        // Live collect always (custom override wins). debugMode attaches debug_mode=1 on events
+        // so hits show in GA4 DebugView; /debug/mp/collect is validation-only and never appears there.
+        val endpoint = config.customEndpoint ?: GA4Config.DEFAULT_ENDPOINT
 
         val url = buildString {
             append(endpoint)
@@ -357,33 +367,8 @@ class GA4Client(
                 }
 
                 if (response.status.isSuccess()) {
-                    logger.debug(request.events.size) {
-                        "Successfully sent {eventCount} events to GA4"
-                    }
-                    if (config.debugMode) {
-                        try {
-                            val ga4Response = response.body<GA4Response>()
-                            if (ga4Response.validationMessages.isNotEmpty()) {
-                                ga4Response.validationMessages.forEach { message ->
-                                    when (message.validationCode?.uppercase()) {
-                                        "ERROR", "VALUE_INVALID", "NAME_INVALID" -> logger.error(
-                                            message.fieldPath ?: "Unknown field",
-                                            message.description ?: "No description"
-                                        ) { "GA4 Validation - {fieldPath}: {description}" }
-                                        "WARNING" -> logger.warn(
-                                            message.fieldPath ?: "Unknown field",
-                                            message.description ?: "No description"
-                                        ) { "GA4 Validation - {fieldPath}: {description}" }
-                                        else -> logger.info(
-                                            message.fieldPath ?: "Unknown field",
-                                            message.description ?: "No description"
-                                        ) { "GA4 Validation - {fieldPath}: {description}" }
-                                    }
-                                }
-                            }
-                        } catch (_: Exception) {
-                            logger.debug { "Debug response parsing failed, likely successful" }
-                        }
+                    logger.debug(request.events.size, config.debugMode) {
+                        "Successfully sent {eventCount} events to GA4 (debugMode={debugMode})"
                     }
                     return
                 } else {

@@ -41,7 +41,11 @@ data class GA4Config(
     val defaultClientId: String? = null,
     
     /**
-     * Whether to enable debug mode for validation
+     * When true, events are sent to the live `/mp/collect` endpoint with a
+     * `debug_mode=1` event parameter so they appear in GA4 DebugView.
+     *
+     * Note: the separate `/debug/mp/collect` URL is a validation-only server
+     * and does **not** surface in DebugView — do not use it for live debugging.
      */
     val debugMode: Boolean = false,
     
@@ -151,7 +155,8 @@ data class GA4Config(
         const val EU_ENDPOINT = "https://region1.google-analytics.com/mp/collect"
         
         /**
-         * Debug validation endpoint
+         * Validation-only endpoint (returns validation messages; does not ingest
+         * events and will not show in DebugView). Prefer [debugMode] + live collect.
          */
         const val DEBUG_ENDPOINT = "https://www.google-analytics.com/debug/mp/collect"
     }

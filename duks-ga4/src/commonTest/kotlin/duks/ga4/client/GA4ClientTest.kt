@@ -247,25 +247,32 @@ class GA4ClientTest {
     }
     
     @Test
-    fun `should use debug endpoint when debug mode is enabled`() =  runTest(timeout = 5.seconds) {
-        val mockEngine = MockEngine { request ->
-            // Verify debug endpoint is used
-            assertEquals("https://www.google-analytics.com/debug/mp/collect", request.url.toString().substringBefore("?"))
-            
-            respond(
-                content = "",
-                status = HttpStatusCode.NoContent
+    fun `should use live collect endpoint and attach debug_mode when debug mode is enabled`() =
+        runTest(timeout = 5.seconds) {
+            var capturedBody: String? = null
+            val mockEngine =
+                MockEngine { request ->
+                    assertEquals(
+                        "https://www.google-analytics.com/mp/collect",
+                        request.url.toString().substringBefore("?"),
+                    )
+                    capturedBody = request.body.toByteArray().decodeToString()
+                    respond(content = "", status = HttpStatusCode.NoContent)
+                }
+
+            val debugConfig = config.copy(debugMode = true)
+            client = GA4Client(debugConfig, mockEngine, backgroundScope)
+
+            val event = TestUtils.createTestEvent()
+            val result = client.sendEvent(event, "test-client", immediate = true)
+
+            assertTrue(result.isSuccess)
+            assertNotNull(capturedBody)
+            assertTrue(
+                capturedBody!!.contains("debug_mode"),
+                "debugMode should attach debug_mode event param for DebugView: $capturedBody",
             )
         }
-        
-        val debugConfig = config.copy(debugMode = true)
-        client = GA4Client(debugConfig, mockEngine, backgroundScope)
-        
-        val event = TestUtils.createTestEvent()
-        val result = client.sendEvent(event, "test-client", immediate = true)
-        
-        assertTrue(result.isSuccess)
-    }
     
     @Test
     fun `should use custom endpoint when configured`() =  runTest(timeout = 5.seconds) {
