@@ -23,9 +23,11 @@ A Kotlin Multiplatform library for Google Analytics 4 (GA4) with the [duks](http
 
 ```kotlin
 dependencies {
-    implementation("io.github.crowded-libs:duks-ga4:0.1.0")
+    implementation("io.github.crowded-libs:duks-ga4:0.2.0")
 }
 ```
+
+Requires **duks 0.4** and **duks-routing 0.3.1+** when using routing analytics.
 
 ## Quick start (duks store)
 
@@ -35,8 +37,16 @@ Most apps should attach analytics through the store. Map actions to events, prov
 import duks.*
 import duks.ga4.middleware.ga4Analytics
 import duks.ga4.model.*
+import duks.routing.HasRouterState
+import duks.routing.RouterState
+import duks.routing.routing
 
-data class AppState(val userId: String? = null) : StateModel
+data class AppState(
+    val userId: String? = null,
+    override val routerState: RouterState = RouterState(),
+) : HasRouterState {
+    override fun withRouterState(routerState: RouterState) = copy(routerState = routerState)
+}
 
 sealed class AppAction : Action {
     data class Login(val method: String) : AppAction()
@@ -46,7 +56,7 @@ sealed class AppAction : Action {
 val store = createStore(AppState()) {
     val router = routing {
         content("/home") { HomeScreen() }
-        content("/product/:id") { ProductScreen() }
+        content("/product/{id}") { ProductScreen() }
     }
 
     ga4Analytics {
@@ -57,8 +67,7 @@ val store = createStore(AppState()) {
         }
 
         clientIdProvider { state -> state.userId }
-        routerMiddleware(router)
-        enableRoutingAnalytics()
+        trackRouting(router)
 
         patternMapper {
             pattern<AppAction.Login> { action, _ ->
@@ -80,7 +89,17 @@ val store = createStore(AppState()) {
 }
 ```
 
-With routing analytics enabled you automatically get `screen_view`, navigation, modal, and tab events from duks-routing. You can also call `enableRoutingAnalytics()` without `routerMiddleware(router)` — the middleware will listen for routing actions on the store.
+`trackRouting(router)` registers a `NavigationListener` on duks-routing so every committed stack change produces routing analytics. You get:
+
+| Event | Notable params |
+|-------|----------------|
+| `screen_view` | `screen_name`, `screen_class`, `previous_screen`, `modal_route`, … |
+| `screen_time` | `screen_name`, `route_duration_seconds`, `engagement_time_msec` |
+| `navigation` | `from_screen`, `to_screen`, `navigation_type`, `navigation_pattern`, … |
+| `modal_open` / `modal_close` / `modal_dismiss` | `modal_name`, `modal_path`, `parent_screen` |
+| `tab_switch` | `tab_name`, `screen_name` (when route `config` has `selectedTab`) |
+
+App state must implement `HasRouterState` + `withRouterState` (required by duks-routing 0.3). Domain reducers should not handle routing actions — stacks are reducer-owned by the routing library.
 
 ## Standalone client
 

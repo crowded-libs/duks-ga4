@@ -1,17 +1,22 @@
 package duks.ga4.middleware
 
 import androidx.compose.runtime.Composable
-import duks.StateModel
-import duks.StoreBuilder
-import duks.StoreLifecycleAware
 import duks.createStore
 import duks.ga4.client.IGA4Client
 import duks.ga4.config.GA4Config
+import duks.ga4.model.EventParamValue
 import duks.ga4.model.GA4Event
 import duks.logging.Logger
 import duks.logging.info
-import duks.logging.warn
-import duks.routing.*
+import duks.routing.HasRouterState
+import duks.routing.NavigationLayer
+import duks.routing.NavigationMode
+import duks.routing.RouterMiddleware
+import duks.routing.RouterState
+import duks.routing.routeTo
+import duks.routing.routing
+import duks.routing.showModal
+import duks.routing.goBack
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -26,97 +31,25 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 class RoutingAnalyticsTest {
-    
-    @Test
-    fun `test minimal GA4 middleware setup`() = runTest(timeout = 5.seconds) {
-        val mockClient = MockGA4Client()
-        val config = GA4Config(
-            measurementId = "G-TEST",
-            apiSecret = "test-secret",
-            debugMode = true
-        )
-        
-        val ga4Middleware = GA4Middleware<TestAppState>(
-            config = config,
-            enableRoutingAnalytics = false, // Disable routing to isolate issue
-            flushInterval = 1.hours,
-            clientFactory = { mockClient },
-            scope = backgroundScope  // Use backgroundScope for background tasks
-        )
-        
-        val store = createStore(TestAppState()) {
-            scope(backgroundScope)
-            middleware {
-                middleware(ga4Middleware)
-                scope(this@runTest)
-                lifecycleAware(ga4Middleware)
-            }
-        }
-        
-        // Just initialize and immediately clean up
-        ga4Middleware.onDetach()
-        
-        // Test passes if we get here without timeout
-        assertTrue(true)
-    }
-    
-    @Test
-    fun `test GA4 middleware with routing but no direct integration`() = runTest(timeout = 5.seconds) {
-        val mockClient = MockGA4Client()
-        val config = GA4Config(
-            measurementId = "G-TEST",
-            apiSecret = "test-secret",
-            debugMode = true
-        )
-        
-        val ga4Middleware = GA4Middleware<TestAppState>(
-            config = config,
-            enableRoutingAnalytics = true, // Enable routing
-            routerMiddleware = null, // No direct integration
-            flushInterval = 1.hours,
-            clientFactory = { mockClient },
-            scope = backgroundScope  // Use backgroundScope for background tasks
-        )
-        
-        val store = createStore(TestAppState()) {
-            scope(backgroundScope)
-            routing {
-                content("/home") { TestHomeScreen() }
-            }
-            
-            middleware {
-                middleware(ga4Middleware)
-                lifecycleAware(ga4Middleware)
-            }
-        }
-        
-        // Navigate and clean up
-        store.routeTo("/home")
-        delay(100)
-        ga4Middleware.onDetach()
-        
-        // Test passes if we get here without timeout
-        assertTrue(true)
-    }
-    
+
     private val logger = Logger.default()
-    
-    // Test state
+
     data class TestAppState(
         val user: User? = null,
-        val currentRoute: String? = null
-    ) : StateModel
-    
+        override val routerState: RouterState = RouterState()
+    ) : HasRouterState {
+        override fun withRouterState(routerState: RouterState) = copy(routerState = routerState)
+    }
+
     data class User(
         val id: String,
         val name: String
     )
-    
-    // Mock GA4 client for testing
+
     class MockGA4Client : IGA4Client {
         val sentEvents = mutableListOf<GA4Event>()
         var closed = false
-        
+
         override suspend fun sendEvent(
             event: GA4Event,
             clientId: String?,
@@ -127,7 +60,7 @@ class RoutingAnalyticsTest {
             sentEvents.add(event)
             return Result.success(Unit)
         }
-        
+
         override suspend fun sendEvents(
             events: List<GA4Event>,
             clientId: String?,
@@ -138,389 +71,385 @@ class RoutingAnalyticsTest {
             sentEvents.addAll(events)
             return Result.success(Unit)
         }
-        
-        override suspend fun flush() {
-            // No-op for testing
-        }
-        
-        override suspend fun getQueueSize(): Int {
-            return 0
-        }
-        
+
+        override suspend fun flush() {}
+
+        override suspend fun getQueueSize(): Int = 0
+
         override suspend fun close() {
             closed = true
         }
     }
-    
+
+    private fun stringParam(event: GA4Event, key: String): String? =
+        (event.params[key] as? EventParamValue.StringValue)?.value
+
     @Test
-    fun `test routing analytics with direct RouterMiddleware integration`() = runTest(timeout = 5.seconds) {
+    fun `middleware without trackRouting does not require router`() = runTest(timeout = 5.seconds) {
         val mockClient = MockGA4Client()
-        val config = GA4Config(
-            measurementId = "G-TEST",
-            apiSecret = "test-secret",
-            debugMode = true
+        val config = GA4Config(measurementId = "G-TEST", apiSecret = "test-secret", debugMode = true)
+
+        val ga4Middleware = GA4Middleware<TestAppState>(
+            config = config,
+            flushInterval = 1.hours,
+            clientFactory = { mockClient },
+            scope = backgroundScope
         )
-        
-        lateinit var routerMiddleware: RouterMiddleware<TestAppState>
-        lateinit var ga4Middleware: GA4Middleware<TestAppState>
-        
+
         val store = createStore(TestAppState()) {
             scope(backgroundScope)
-            // Set up routing
-            routerMiddleware = routing {
+            middleware {
+                middleware(ga4Middleware)
+                lifecycleAware(ga4Middleware)
+            }
+            reduceWith { state, _ -> state }
+        }
+        // Ensure lifecycle ran even if the store defers init until first use
+        ga4Middleware.onStoreCreated(store)
+        assertTrue(ga4Middleware.isInitialized)
+
+        ga4Middleware.onDetach()
+        assertTrue(mockClient.closed)
+    }
+
+    @Test
+    fun `trackRouting emits screen_view navigation and modal events`() = runTest(timeout = 5.seconds) {
+        val mockClient = MockGA4Client()
+        val config = GA4Config(measurementId = "G-TEST", apiSecret = "test-secret", debugMode = true)
+
+        lateinit var router: RouterMiddleware<TestAppState>
+        lateinit var ga4: GA4Middleware<TestAppState>
+
+        val store = createStore(TestAppState()) {
+            scope(backgroundScope)
+            router = routing {
                 content("/home") { TestHomeScreen() }
                 content("/profile") { TestProfileScreen() }
                 modal("/settings") { TestSettingsModal() }
             }
-            // Set up GA4 with direct router integration
-            ga4Middleware = GA4Middleware(
+            ga4 = GA4Middleware(
                 config = config,
-                enableRoutingAnalytics = true,
-                routerMiddleware = routerMiddleware,
-                flushInterval = 1.hours, // Effectively disable auto-flush in tests
+                trackedRouter = router,
+                routingListener = Ga4RoutingListener(),
+                ownsRouterListener = true,
+                flushInterval = 1.hours,
                 clientIdProvider = { "test-client-id" },
                 userIdProvider = { state -> state.user?.id },
                 clientFactory = { mockClient },
-                scope = backgroundScope  // Use backgroundScope for background tasks
+                scope = backgroundScope
             )
-            
             middleware {
-                middleware(ga4Middleware)
-                lifecycleAware(ga4Middleware)
+                middleware(ga4)
+                lifecycleAware(ga4)
             }
-            
-            // Track router state in app state
-            reduceWith { state, action ->
-                when (action) {
-                    is Routing.StateChanged -> {
-                        state.copy(currentRoute = action.routerState.toScreenName())
-                    }
-                    else -> state
-                }
-            }
+            reduceWith { state, _ -> state }
         }
-        
-        logger.info { "Test: Store created, checking initial router state" }
-        logger.info { "Initial router state: ${routerMiddleware.state.value}" }
-        
-        // Navigate to home first
-        logger.info { "Test: Navigating to /home" }
+
         store.routeTo("/home")
-        store.state.first { it.currentRoute == "home" }
-        logger.info { "Test: Navigation to /home completed" }
-        
-        // Manually flush events since auto-flush is disabled
-        ga4Middleware.flushEvents()
+        router.state.first { it.contentRoutes.any { r -> r.path == "/home" } }
+        runCurrent()
+        advanceUntilIdle()
+        ga4.flushEvents()
         runCurrent()
         advanceUntilIdle()
 
-        // Verify screen_view event was sent
-        logger.info { "All events: ${mockClient.sentEvents.map { "${it.name}: ${it.params}" }}" }
-        val homeScreenEvents = mockClient.sentEvents.filter { it.name == "screen_view" }
-        logger.info { "Screen view events: ${homeScreenEvents.size}" }
-        assertTrue(homeScreenEvents.isNotEmpty(), "Expected at least one screen_view event")
-        
-        // Find the home screen event (might be multiple if we navigated twice)
-        val homeScreenEvent = homeScreenEvents.find { event ->
-            (event.params["screen_name"] as? duks.ga4.model.EventParamValue.StringValue)?.value == "home"
+        val homeScreenEvent = mockClient.sentEvents.find {
+            it.name == "screen_view" && stringParam(it, "screen_name") == "home"
         }
-        assertNotNull(homeScreenEvent, "Expected to find a screen_view event for home screen")
-        assertEquals("Content", (homeScreenEvent.params["screen_class"] as? duks.ga4.model.EventParamValue.StringValue)?.value)
-        
-        // Navigate to profile
+        assertNotNull(homeScreenEvent, "Expected screen_view for home; got ${mockClient.sentEvents.map { it.name }}")
+        assertEquals("Content", stringParam(homeScreenEvent, "screen_class"))
+
         store.routeTo("/profile")
-        store.state.first { it.currentRoute == "profile" }
-        
-        // Give time for events to be generated
+        router.state.first { it.contentRoutes.any { r -> r.path == "/profile" } }
+        runCurrent()
+        advanceUntilIdle()
+        ga4.flushEvents()
         runCurrent()
         advanceUntilIdle()
 
-        // Flush events after navigation
-        ga4Middleware.flushEvents()
-        runCurrent()
-        advanceUntilIdle()
-
-        // Log all events to debug
-        logger.info { "All events after profile navigation: ${mockClient.sentEvents.map { "${it.name}: ${it.params}" }}" }
-        
-        // Verify navigation event was sent
-        val navigationEvents = mockClient.sentEvents.filter { it.name == "navigation" }
-        logger.info { "Navigation events: ${navigationEvents.size}" }
-        logger.info { "Navigation event details: ${navigationEvents.map { "${it.params["from_screen"]} -> ${it.params["to_screen"]}" }}" }
-        assertTrue(navigationEvents.size >= 1, "Expected at least 1 navigation event")
-        
-        // Find the navigation from home to profile
-        val profileNavEvent = navigationEvents.find { event ->
-            (event.params["to_screen"] as? duks.ga4.model.EventParamValue.StringValue)?.value == "profile"
+        val profileNav = mockClient.sentEvents.find {
+            it.name == "navigation" && stringParam(it, "to_screen") == "profile"
         }
-        assertNotNull(profileNavEvent, "Expected to find navigation event to profile")
-        assertEquals("push", (profileNavEvent.params["navigation_type"] as? duks.ga4.model.EventParamValue.StringValue)?.value)
-        
-        // Show modal
+        assertNotNull(profileNav, "Expected navigation to profile")
+        assertEquals("push", stringParam(profileNav, "navigation_type"))
+        assertEquals("home", stringParam(profileNav, "from_screen"))
+
         store.showModal("/settings")
-        routerMiddleware.state.first { it.modalRoutes.isNotEmpty() }
-        
-        // Give time for events to be generated
+        router.state.first { it.modalRoutes.isNotEmpty() }
+        runCurrent()
+        advanceUntilIdle()
+        ga4.flushEvents()
         runCurrent()
         advanceUntilIdle()
 
-        // Flush events after showing modal
-        ga4Middleware.flushEvents()
-        runCurrent()
-        advanceUntilIdle()
+        val modalOpen = mockClient.sentEvents.find { it.name == "modal_open" }
+        assertNotNull(modalOpen, "Expected modal_open")
+        assertEquals("settings", stringParam(modalOpen, "modal_name"))
+        assertEquals("profile", stringParam(modalOpen, "parent_screen"))
 
-        // Verify modal events
-        logger.info { "All events after modal: ${mockClient.sentEvents.map { it.name }}" }
-        val modalEvents = mockClient.sentEvents.filter { it.name == "modal_open" || it.name == "modal_dismiss" }
-        logger.info { "Modal events: ${modalEvents.size}" }
-        
-        val modalOpenEvent = mockClient.sentEvents.find { it.name == "modal_open" }
-        if (modalOpenEvent != null) {
-            assertEquals("settings", (modalOpenEvent.params["modal_name"] as? duks.ga4.model.EventParamValue.StringValue)?.value)
-            assertEquals("profile", (modalOpenEvent.params["parent_screen"] as? duks.ga4.model.EventParamValue.StringValue)?.value)
-        } else {
-            logger.warn { "Modal open event not found" }
-        }
-        
-        // Dismiss modal
         store.goBack()
-        routerMiddleware.state.first { it.modalRoutes.isEmpty() }
-        
-        // Give time for events to be generated
+        router.state.first { it.modalRoutes.isEmpty() }
+        runCurrent()
+        advanceUntilIdle()
+        ga4.flushEvents()
         runCurrent()
         advanceUntilIdle()
 
-        // Flush events before checking
-        ga4Middleware.flushEvents()
-        runCurrent()
-        advanceUntilIdle()
-
-        // Verify modal dismiss event
-        val modalDismissEvent = mockClient.sentEvents.find { it.name == "modal_dismiss" }
-        if (modalDismissEvent != null) {
-            logger.info { "Found modal dismiss event" }
-        } else {
-            logger.warn { "Modal dismiss event not found" }
-        }
-        
-        // Clean up
-        ga4Middleware.onDetach()
-    }
-    
-    @Test
-    fun `test routing analytics with action-based integration`() = runTest(timeout = 5.seconds) {
-        val mockClient = MockGA4Client()
-        val config = GA4Config(
-            measurementId = "G-TEST",
-            apiSecret = "test-secret",
-            debugMode = true
+        assertNotNull(
+            mockClient.sentEvents.find { it.name == "modal_dismiss" },
+            "Expected modal_dismiss"
         )
-        
-        lateinit var ga4Middleware: GA4Middleware<TestAppState>
-        
+
+        ga4.onDetach()
+    }
+
+    @Test
+    fun `trackRouting with ClearHistory reports reset navigation_type`() = runTest(timeout = 5.seconds) {
+        val mockClient = MockGA4Client()
+        val config = GA4Config(measurementId = "G-TEST", apiSecret = "test-secret", debugMode = true)
+
+        lateinit var router: RouterMiddleware<TestAppState>
+        lateinit var ga4: GA4Middleware<TestAppState>
+
         val store = createStore(TestAppState()) {
             scope(backgroundScope)
-            // Set up routing
-            routing {
+            router = routing {
                 content("/home") { TestHomeScreen() }
                 content("/profile") { TestProfileScreen() }
             }
-
-            // Set up GA4 without direct router integration
-            // It will listen for Routing.StateChanged actions
-            ga4Middleware = GA4Middleware(
+            ga4 = GA4Middleware(
                 config = config,
-                enableRoutingAnalytics = true,
-                flushInterval = 1.hours, // Disable auto-flush
+                trackedRouter = router,
+                routingListener = Ga4RoutingListener(),
+                ownsRouterListener = true,
+                flushInterval = 1.hours,
                 clientFactory = { mockClient },
-                scope = backgroundScope  // Use backgroundScope for background tasks
+                scope = backgroundScope
             )
-            
             middleware {
-                middleware(ga4Middleware)
-                lifecycleAware(ga4Middleware)
+                middleware(ga4)
+                lifecycleAware(ga4)
             }
-            
-            // Track router state in app state
-            reduceWith { state, action ->
-                when (action) {
-                    is Routing.StateChanged -> {
-                        state.copy(currentRoute = action.routerState.toScreenName())
-                    }
-                    else -> state
-                }
-            }
+            reduceWith { state, _ -> state }
         }
-        
-        // Navigate to home
+
         store.routeTo("/home")
-        store.state.first { it.currentRoute == "home" }
-        
-        // Manually flush events since auto-flush is disabled  
-        ga4Middleware.flushEvents()
+        router.state.first { it.contentRoutes.any { r -> r.path == "/home" } }
+        store.routeTo("/profile")
+        router.state.first { it.contentRoutes.any { r -> r.path == "/profile" } }
+        runCurrent()
+        advanceUntilIdle()
+        mockClient.sentEvents.clear()
+
+        store.routeTo("/home", mode = NavigationMode.ClearHistory)
+        router.state.first {
+            it.contentRoutes.size == 1 && it.contentRoutes.single().path == "/home"
+        }
+        runCurrent()
+        advanceUntilIdle()
+        ga4.flushEvents()
         runCurrent()
         advanceUntilIdle()
 
-        // Verify screen_view event was sent
-        val homeScreenEvent = mockClient.sentEvents.find { 
-            it.name == "screen_view" &&
-            (it.params["screen_name"] as? duks.ga4.model.EventParamValue.StringValue)?.value == "home"
-        }
-        assertNotNull(homeScreenEvent, "Expected to find a screen_view event for home screen, but found: ${mockClient.sentEvents.map { it.name }}")
-        
-        // Clean up
-        ga4Middleware.onDetach()
+        val nav = mockClient.sentEvents.find { it.name == "navigation" }
+        assertNotNull(nav, "Expected navigation event after ClearHistory")
+        assertEquals("reset", stringParam(nav, "navigation_type"))
+
+        ga4.onDetach()
     }
-    
+
     @Test
-    fun `test tab navigation tracking`() = runTest(timeout = 5.seconds) {
+    fun `tab navigation emits tab_switch`() = runTest(timeout = 5.seconds) {
         val mockClient = MockGA4Client()
-        val config = GA4Config(
-            measurementId = "G-TEST",
-            apiSecret = "test-secret",
-            debugMode = true
-        )
-        
-        lateinit var routerMiddleware: RouterMiddleware<TestAppState>
-        lateinit var ga4Middleware: GA4Middleware<TestAppState>
-        
+        val config = GA4Config(measurementId = "G-TEST", apiSecret = "test-secret", debugMode = true)
+
+        lateinit var router: RouterMiddleware<TestAppState>
+        lateinit var ga4: GA4Middleware<TestAppState>
+
         val store = createStore(TestAppState()) {
             scope(backgroundScope)
-            routerMiddleware = routing {
+            router = routing {
                 content("/videos", config = mapOf("selectedTab" to "videos")) { TestVideosScreen() }
                 content("/music", config = mapOf("selectedTab" to "music")) { TestMusicScreen() }
             }
-
-            ga4Middleware = GA4Middleware(
+            ga4 = GA4Middleware(
                 config = config,
-                enableRoutingAnalytics = true,
-                routerMiddleware = routerMiddleware,
+                trackedRouter = router,
+                routingListener = Ga4RoutingListener(),
+                ownsRouterListener = true,
                 flushInterval = 50.milliseconds,
                 clientFactory = { mockClient },
-                scope = backgroundScope  // Use backgroundScope for background tasks
+                scope = backgroundScope
             )
-            
             middleware {
-                middleware(ga4Middleware)
-                lifecycleAware(ga4Middleware)
+                middleware(ga4)
+                lifecycleAware(ga4)
             }
+            reduceWith { state, _ -> state }
         }
-        
-        // Navigate to videos tab
+
         store.routeTo("/videos")
-        routerMiddleware.state.first { it.getCurrentContentRoute()?.route?.path == "/videos" }
-        
-        // Navigate to music tab
+        router.state.first { it.getCurrentContentRoute()?.path == "/videos" }
         store.routeTo("/music")
-        routerMiddleware.state.first { it.getCurrentContentRoute()?.route?.path == "/music" }
-        
-        // Give time for events to be processed and flushed
+        router.state.first { it.getCurrentContentRoute()?.path == "/music" }
         runCurrent()
         advanceUntilIdle()
-        
-        // Manually trigger flush since auto-flush might not have fired
-        ga4Middleware.flushEvents()
+        ga4.flushEvents()
         runCurrent()
         advanceUntilIdle()
 
-        // Log all events
-        logger.info { "All events in tab test: ${mockClient.sentEvents.map { it.name }}" }
-        
-        // Verify tab switch event
-        // Verify tab switch event - looking for the last one which should be music
         val tabSwitchEvents = mockClient.sentEvents.filter { it.name == "tab_switch" }
-        logger.info { "Tab switch events: ${tabSwitchEvents.map { it.params["tab_name"] }}" }
         assertTrue(tabSwitchEvents.size >= 2, "Expected at least 2 tab_switch events")
-        assertEquals("music", (tabSwitchEvents.last().params["tab_name"] as? duks.ga4.model.EventParamValue.StringValue)?.value)
+        assertEquals("music", stringParam(tabSwitchEvents.last(), "tab_name"))
+
+        ga4.onDetach()
     }
-    
+
     @Test
-    fun `test scene navigation tracking`() = runTest(timeout = 5.seconds) {
+    fun `scene navigation emits screen_view with Scene class`() = runTest(timeout = 5.seconds) {
         val mockClient = MockGA4Client()
-        val config = GA4Config(
-            measurementId = "G-TEST",
-            apiSecret = "test-secret",
-            debugMode = true
-        )
-        
-        lateinit var routerMiddleware: RouterMiddleware<TestAppState>
-        lateinit var ga4Middleware: GA4Middleware<TestAppState>
-        
+        val config = GA4Config(measurementId = "G-TEST", apiSecret = "test-secret", debugMode = true)
+
+        lateinit var router: RouterMiddleware<TestAppState>
+        lateinit var ga4: GA4Middleware<TestAppState>
+
         val store = createStore(TestAppState()) {
             scope(backgroundScope)
-            routerMiddleware = routing {
+            router = routing {
                 scene("/splash") { TestSplashScreen() }
                 scene("/login") { TestLoginScreen() }
                 content("/home") { TestHomeScreen() }
             }
-
-            ga4Middleware = GA4Middleware(
+            ga4 = GA4Middleware(
                 config = config,
-                enableRoutingAnalytics = true,
-                routerMiddleware = routerMiddleware,
-                flushInterval = 1.hours, // Disable auto-flush
+                trackedRouter = router,
+                routingListener = Ga4RoutingListener(),
+                ownsRouterListener = true,
+                flushInterval = 1.hours,
                 clientFactory = { mockClient },
-                scope = backgroundScope  // Use backgroundScope for background tasks
+                scope = backgroundScope
             )
-            
             middleware {
-                middleware(ga4Middleware)
-                lifecycleAware(ga4Middleware)
+                middleware(ga4)
+                lifecycleAware(ga4)
             }
+            reduceWith { state, _ -> state }
         }
-        
-        // Navigate to splash scene
+
         store.routeTo("/splash", layer = NavigationLayer.Scene)
-        routerMiddleware.state.first { it.sceneRoutes.isNotEmpty() }
-        
-        // Manually flush events
-        ga4Middleware.flushEvents()
+        router.state.first { it.sceneRoutes.isNotEmpty() }
+        runCurrent()
+        advanceUntilIdle()
+        ga4.flushEvents()
         runCurrent()
         advanceUntilIdle()
 
-        // Verify scene navigation event
-        val splashEvent = mockClient.sentEvents.find { 
-            it.name == "screen_view" &&
-            (it.params["screen_name"] as? duks.ga4.model.EventParamValue.StringValue)?.value == "splash"
+        val splashEvent = mockClient.sentEvents.find {
+            it.name == "screen_view" && stringParam(it, "screen_name") == "splash"
         }
         assertNotNull(splashEvent)
-        assertEquals("Scene", (splashEvent.params["screen_class"] as? duks.ga4.model.EventParamValue.StringValue)?.value)
-        
-        // Navigate to login scene
-        logger.info { "Navigating to /login scene" }
+        assertEquals("Scene", stringParam(splashEvent, "screen_class"))
+
         store.routeTo("/login", layer = NavigationLayer.Scene)
-        routerMiddleware.state.first { 
-            it.sceneRoutes.size == 2 && it.sceneRoutes.last().route?.path == "/login"
-        }
-        logger.info { "Navigation to /login completed, current state: ${routerMiddleware.state.value}" }
-        
-        // Flush events
-        ga4Middleware.flushEvents()
+        router.state.first { it.sceneRoutes.any { r -> r.path == "/login" } }
         runCurrent()
         advanceUntilIdle()
-        
-        // Log all events to debug
-        logger.info { "All events after scene navigation: ${mockClient.sentEvents.map { "${it.name}: ${it.params}" }}" }
-        
-        // Verify we have at least a screen view for splash
-        val sceneScreenEvents = mockClient.sentEvents.filter { 
-            it.name == "screen_view" &&
-            (it.params["screen_class"] as? duks.ga4.model.EventParamValue.StringValue)?.value == "Scene"
+        ga4.flushEvents()
+        runCurrent()
+        advanceUntilIdle()
+
+        val sceneViews = mockClient.sentEvents.filter {
+            it.name == "screen_view" && stringParam(it, "screen_class") == "Scene"
         }
-        assertTrue(sceneScreenEvents.isNotEmpty(), "Expected at least one scene screen_view event")
-        
-        // Verify splash screen was tracked
-        val splashScreenEvent = sceneScreenEvents.find { 
-            (it.params["screen_name"] as? duks.ga4.model.EventParamValue.StringValue)?.value == "splash"
+        assertTrue(sceneViews.isNotEmpty())
+
+        ga4.onDetach()
+    }
+
+    @Test
+    fun `builder trackRouting wires listener`() = runTest(timeout = 5.seconds) {
+        val mockClient = MockGA4Client()
+        lateinit var router: RouterMiddleware<TestAppState>
+
+        val store = createStore(TestAppState()) {
+            scope(backgroundScope)
+            router = routing {
+                content("/home") { TestHomeScreen() }
+            }
+            ga4Analytics {
+                config {
+                    measurementId("G-TEST")
+                    apiSecret("test-secret")
+                    debugMode()
+                }
+                trackRouting(router)
+                flushInterval(1.hours)
+                clientFactory { mockClient }
+                scope(backgroundScope)
+            }
+            reduceWith { state, _ -> state }
         }
-        assertNotNull(splashScreenEvent, "Expected to find screen_view event for splash scene")
-        
-        // Clean up
-        ga4Middleware.onDetach()
+
+        store.routeTo("/home")
+        router.state.first { it.contentRoutes.any { r -> r.path == "/home" } }
+        // Allow async listener enqueue
+        delay(100)
+        runCurrent()
+        advanceUntilIdle()
+
+        assertTrue(
+            mockClient.sentEvents.any { it.name == "screen_view" },
+            "Expected screen_view via trackRouting builder; got ${mockClient.sentEvents.map { it.name }}"
+        )
+    }
+
+    @Test
+    fun `remove listener on detach stops further events`() = runTest(timeout = 5.seconds) {
+        val mockClient = MockGA4Client()
+        val config = GA4Config(measurementId = "G-TEST", apiSecret = "test-secret", debugMode = true)
+
+        lateinit var router: RouterMiddleware<TestAppState>
+        lateinit var ga4: GA4Middleware<TestAppState>
+
+        val store = createStore(TestAppState()) {
+            scope(backgroundScope)
+            router = routing {
+                content("/home") { TestHomeScreen() }
+                content("/profile") { TestProfileScreen() }
+            }
+            ga4 = GA4Middleware(
+                config = config,
+                trackedRouter = router,
+                routingListener = Ga4RoutingListener(),
+                ownsRouterListener = true,
+                flushInterval = 1.hours,
+                clientFactory = { mockClient },
+                scope = backgroundScope
+            )
+            middleware {
+                middleware(ga4)
+                lifecycleAware(ga4)
+            }
+            reduceWith { state, _ -> state }
+        }
+
+        store.routeTo("/home")
+        router.state.first { it.contentRoutes.any { r -> r.path == "/home" } }
+        runCurrent()
+        advanceUntilIdle()
+        ga4.onDetach()
+        mockClient.sentEvents.clear()
+
+        store.routeTo("/profile")
+        router.state.first { it.contentRoutes.any { r -> r.path == "/profile" } }
+        runCurrent()
+        advanceUntilIdle()
+        delay(50)
+
+        assertTrue(mockClient.sentEvents.isEmpty(), "No events after detach")
     }
 }
 
-// Test composables
 @Composable
 private fun TestHomeScreen() {}
 
@@ -541,43 +470,3 @@ private fun TestSplashScreen() {}
 
 @Composable
 private fun TestLoginScreen() {}
-
-// Helper function to add GA4 analytics with mock client
-private fun <TState : StateModel> StoreBuilder<TState>.ga4AnalyticsWithMockClient(
-    mockClient: RoutingAnalyticsTest.MockGA4Client,
-    config: GA4Config,
-    builder: GA4MiddlewareBuilder<TState>.() -> Unit
-) {
-    val ga4Builder = GA4MiddlewareBuilder<TState>()
-        .config(config)
-        .clientFactory { mockClient }
-        .apply(builder)
-    
-    val middleware = ga4Builder.build()
-    middleware {
-        middleware(middleware)
-        if (middleware is StoreLifecycleAware<*>) {
-            @Suppress("UNCHECKED_CAST")
-            lifecycleAware(middleware as StoreLifecycleAware<TState>)
-        }
-    }
-}
-
-// Extension function to convert RouterState to screen name for testing
-private fun RouterState.toScreenName(): String {
-    return when {
-        modalRoutes.isNotEmpty() -> {
-            val modal = modalRoutes.last()
-            val modalPath = modal.route?.path?.removePrefix("/")
-            val contentPath = contentRoutes.lastOrNull()?.route?.path?.removePrefix("/") ?: "unknown"
-            "${contentPath}_modal_$modalPath"
-        }
-        contentRoutes.isNotEmpty() -> {
-            contentRoutes.last().route?.path?.removePrefix("/")
-        }
-        sceneRoutes.isNotEmpty() -> {
-            sceneRoutes.last().route?.path?.removePrefix("/")
-        }
-        else -> "unknown"
-    } ?: "unknown"
-}

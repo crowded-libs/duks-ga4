@@ -29,7 +29,6 @@ class GA4MiddlewareBuilder<TState : StateModel> {
     private var scope: CoroutineScope = CoroutineScope(Dispatchers.Default + Job())
     private var config: GA4Config? = null
     private var eventMapper: EventMapper<TState>? = null
-    private var enableRoutingAnalytics: Boolean = true
     private var flushInterval: Duration = 10.seconds
     private var clientIdProvider: suspend (TState) -> String? = { null }
     private var userIdProvider: suspend (TState) -> String? = { null }
@@ -37,7 +36,8 @@ class GA4MiddlewareBuilder<TState : StateModel> {
     private var consentManager: ConsentManager? = null
     private var enablePrivacy: Boolean = false
     private var privacyConfig: PrivacyConfig? = null
-    private var routerMiddleware: RouterMiddleware<TState>? = null
+    private var trackedRouter: RouterMiddleware<*>? = null
+    private var externalRoutingListener: Ga4RoutingListener? = null
     private var clientFactory: (() -> IGA4Client)? = null
     private var contextProvider: ContextProvider? = null
     private var eventQueueStore: EventQueueStore? = null
@@ -88,13 +88,6 @@ class GA4MiddlewareBuilder<TState : StateModel> {
     }
     
     /**
-     * Enables or disables routing analytics
-     */
-    fun enableRoutingAnalytics(enable: Boolean = true) = apply {
-        this.enableRoutingAnalytics = enable
-    }
-    
-    /**
      * Sets the flush interval for batching events
      */
     fun flushInterval(interval: Duration) = apply {
@@ -121,12 +114,33 @@ class GA4MiddlewareBuilder<TState : StateModel> {
     fun userPropertiesProvider(provider: suspend (TState) -> Map<String, UserPropertyValue>?) = apply {
         this.userPropertiesProvider = provider
     }
-    
+
     /**
-     * Sets the RouterMiddleware instance for direct integration
+     * Track navigation via a [NavigationListener] registered on [router].
+     *
+     * Preferred wiring after `routing { }`:
+     * ```kotlin
+     * val router = routing { /* routes */ }
+     * ga4Analytics {
+     *     trackRouting(router)
+     *     // …
+     * }
+     * ```
      */
-    fun routerMiddleware(middleware: RouterMiddleware<TState>) = apply {
-        this.routerMiddleware = middleware
+    fun trackRouting(router: RouterMiddleware<*>) = apply {
+        this.trackedRouter = router
+        this.externalRoutingListener = null
+    }
+
+    /**
+     * Track navigation with a pre-created [Ga4RoutingListener].
+     *
+     * Register the same instance with `routing { onNavigation(listener) }` when you need
+     * build-time composition; otherwise prefer [trackRouting] with a [RouterMiddleware].
+     */
+    fun trackRouting(listener: Ga4RoutingListener) = apply {
+        this.externalRoutingListener = listener
+        this.trackedRouter = null
     }
     
     /**
@@ -236,12 +250,20 @@ class GA4MiddlewareBuilder<TState : StateModel> {
             finalMapper
         }
         
+        val routingListener = when {
+            trackedRouter != null -> Ga4RoutingListener()
+            externalRoutingListener != null -> externalRoutingListener
+            else -> null
+        }
+        val ownsRouterListener = trackedRouter != null
+
         // Create base middleware — client owns the queue
         val baseMiddleware = GA4Middleware(
             config = finalConfig,
             eventMapper = filteredMapper,
-            enableRoutingAnalytics = enableRoutingAnalytics,
-            routerMiddleware = routerMiddleware,
+            trackedRouter = trackedRouter,
+            routingListener = routingListener,
+            ownsRouterListener = ownsRouterListener,
             flushInterval = flushInterval,
             clientIdProvider = clientIdProvider,
             userIdProvider = userIdProvider,
@@ -273,6 +295,10 @@ private class PrivacyAwareGA4Middleware<TState : StateModel>(
     
     override suspend fun onStoreCreated(store: KStore<TState>) {
         baseMiddleware.onStoreCreated(store)
+    }
+
+    override suspend fun onStoreDestroyed() {
+        baseMiddleware.onStoreDestroyed()
     }
     
     override suspend fun invoke(
@@ -362,7 +388,7 @@ class GA4ConfigBuilder {
  *     }
  *     
  *     useDefaultEventMapper()
- *     enableRoutingAnalytics()
+ *     trackRouting(router)
  *     
  *     clientIdProvider { state -> state.user?.id }
  *     userIdProvider { state -> state.user?.analyticsId }
@@ -427,8 +453,8 @@ fun <TState : StateModel> ga4MiddlewareWithPatterns(
 }
 
 /**
- * Extension function for StoreBuilder to add GA4 middleware with automatic RouterMiddleware integration
- * 
+ * Extension function for StoreBuilder to add GA4 middleware.
+ *
  * Example:
  * ```kotlin
  * val store = createStore(AppState()) {
@@ -436,13 +462,13 @@ fun <TState : StateModel> ga4MiddlewareWithPatterns(
  *         content("/home") { HomeScreen() }
  *         content("/profile") { ProfileScreen() }
  *     }
- *     
+ *
  *     ga4Analytics {
  *         config {
  *             measurementId("G-XXXXXXXXXX")
  *             apiSecret("your-api-secret")
  *         }
- *         routerMiddleware(router) // Automatic integration
+ *         trackRouting(router)
  *     }
  * }
  * ```

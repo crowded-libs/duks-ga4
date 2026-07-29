@@ -613,7 +613,6 @@ class GA4MiddlewareTest {
         middleware = GA4Middleware(
             config = config,
             eventMapper = eventMapper,
-            enableRoutingAnalytics = false,
             clientFactory = { mockClient },
             scope = backgroundScope
         )
